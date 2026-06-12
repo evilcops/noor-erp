@@ -1,0 +1,54 @@
+.root {
+  /* page wrapper */
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.search {
+  min-width: 200px;
+  flex: 1;
+}
+
+.emptyBanner {
+  margin-bottom: 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgb(253 230 138);
+  background-color: rgb(255 251 235);
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  color: rgb(146 64 14);
+}
+
+:global(.dark) .emptyBanner {
+  border-color: rgb(120 53 15);
+  background-color: rgb(69 26 3 / 0.3);
+  color: rgb(253 230 138);
+}
+
+.emptyLink {
+  font-weight: 500;
+  text-decoration: underline;
+}
+
+.actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.actionBtn {
+  border-radius: 0.25rem;
+  padding: 0.25rem;
+}
+
+.actionBtn:hover {
+  background-color: var(--muted);
+}
+
+.actionDanger {
+  color: var(--destructive);
+}

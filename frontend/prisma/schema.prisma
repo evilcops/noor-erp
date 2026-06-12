@@ -1,0 +1,103 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RecordStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  BUSINESS_OWNER
+  BRANCH_MANAGER
+  HR_MANAGER
+  EMPLOYEE
+}
+
+model Company {
+  id         String       @id @default(cuid())
+  name       String
+  slug       String       @unique
+  email      String?
+  phone      String?
+  address    String?
+  country    String       @default("OM")
+  createdBy  String?      @map("created_by")
+  updatedBy  String?      @map("updated_by")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+  deletedAt  DateTime?    @map("deleted_at")
+  status     RecordStatus @default(ACTIVE)
+
+  branches Branch[]
+  users    User[]
+
+  @@map("companies")
+}
+
+model Branch {
+  id         String       @id @default(cuid())
+  companyId  String       @map("company_id")
+  name       String
+  code       String
+  address    String?
+  city       String?
+  latitude   Float?
+  longitude  Float?
+  gpsRadiusM Int          @default(200) @map("gps_radius_m")
+  createdBy  String?      @map("created_by")
+  updatedBy  String?      @map("updated_by")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+  deletedAt  DateTime?    @map("deleted_at")
+  status     RecordStatus @default(ACTIVE)
+
+  company Company @relation(fields: [companyId], references: [id])
+  users   User[]
+
+  @@unique([companyId, code])
+  @@map("branches")
+}
+
+model User {
+  id           String       @id @default(cuid())
+  companyId    String?      @map("company_id")
+  branchId     String?      @map("branch_id")
+  email        String       @unique
+  passwordHash String       @map("password_hash")
+  fullName     String       @map("full_name")
+  role         UserRole     @default(EMPLOYEE)
+  createdBy    String?      @map("created_by")
+  updatedBy    String?      @map("updated_by")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+  deletedAt    DateTime?    @map("deleted_at")
+  status       RecordStatus @default(ACTIVE)
+
+  company       Company?       @relation(fields: [companyId], references: [id])
+  branch        Branch?        @relation(fields: [branchId], references: [id])
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  revokedAt DateTime? @map("revoked_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}

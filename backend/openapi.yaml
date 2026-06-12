@@ -1,0 +1,253 @@
+openapi: 3.0.3
+info:
+  title: NOOR ERP API
+  description: Phase 1 — NOOR People HR & Workforce Management
+  version: 1.0.0
+servers:
+  - url: http://localhost:5000/api
+    description: Local development
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+        meta:
+          type: object
+          properties:
+            page: { type: integer }
+            limit: { type: integer }
+            total: { type: integer }
+            totalPages: { type: integer }
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: object }
+security:
+  - bearerAuth: []
+paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register user
+      security: []
+      responses:
+        "201":
+          description: User created
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user
+      responses:
+        "200":
+          description: User profile with permissions
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      security: []
+      responses:
+        "200":
+          description: New tokens
+  /companies:
+    get:
+      tags: [Companies]
+      summary: List companies
+      parameters:
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer } }
+        - { name: search, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Paginated companies
+    post:
+      tags: [Companies]
+      summary: Create company
+      responses:
+        "201":
+          description: Company created
+  /companies/{id}:
+    get:
+      tags: [Companies]
+      summary: Get company
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Company details
+    put:
+      tags: [Companies]
+      summary: Update company
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Updated
+    delete:
+      tags: [Companies]
+      summary: Soft delete company
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Archived
+  /branches:
+    get:
+      tags: [Branches]
+      summary: List branches
+      responses:
+        "200":
+          description: Branch list
+    post:
+      tags: [Branches]
+      summary: Create branch
+      responses:
+        "201":
+          description: Branch created
+  /employees:
+    get:
+      tags: [Employees]
+      summary: List employees
+      parameters:
+        - { name: branchId, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: search, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Employee list
+    post:
+      tags: [Employees]
+      summary: Create employee
+      responses:
+        "201":
+          description: Employee created
+  /attendance/check-in:
+    post:
+      tags: [Attendance]
+      summary: GPS check-in
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lat: { type: number }
+                lng: { type: number }
+      responses:
+        "201":
+          description: Checked in
+  /attendance/check-out:
+    post:
+      tags: [Attendance]
+      summary: GPS check-out
+      responses:
+        "200":
+          description: Checked out
+  /leaves/request:
+    post:
+      tags: [Leave]
+      summary: Submit leave request
+      responses:
+        "201":
+          description: Leave requested
+  /leaves:
+    get:
+      tags: [Leave]
+      summary: List leave requests
+      responses:
+        "200":
+          description: Leave list
+  /recruitment/candidates:
+    get:
+      tags: [Recruitment]
+      summary: List candidates
+      responses:
+        "200":
+          description: Candidates
+    post:
+      tags: [Recruitment]
+      summary: Add candidate
+      responses:
+        "201":
+          description: Candidate added
+  /performance/reviews:
+    get:
+      tags: [Performance]
+      summary: List reviews
+      responses:
+        "200":
+          description: Reviews
+    post:
+      tags: [Performance]
+      summary: Create review
+      responses:
+        "201":
+          description: Review created
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: User notifications
+      responses:
+        "200":
+          description: Notifications
+  /reports/employees:
+    get:
+      tags: [Reports]
+      summary: Employee report
+      responses:
+        "200":
+          description: Report data
+  /admin/health:
+    get:
+      tags: [Admin]
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: API health
+  /admin/audit-logs:
+    get:
+      tags: [Admin]
+      summary: Audit logs (super_admin)
+      responses:
+        "200":
+          description: Audit log entries

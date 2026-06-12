@@ -1,36 +1,51 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# NOOR ERP
 
-## Getting Started
+Monorepo for **NOOR People** (Phase 1 HR module).
 
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+noor-erp/
+├── frontend/     # Next.js 16 + React + Tailwind (UI)
+└── backend/      # Express + MongoDB (REST API)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Quick start
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+# Backend API (port 5000)
+cd backend
+npm install
+npm run dev
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# Frontend (port 3000) — separate terminal
+cd frontend
+npm install
+npm run dev
+```
 
-## Learn More
+Or from the repo root:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run dev:backend
+npm run dev:frontend
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Environment
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| App | Config file | API URL |
+|-----|-------------|---------|
+| Backend | `backend/.env` | `http://localhost:5000/api` |
+| Frontend | `frontend/.env` | `NEXT_PUBLIC_API_URL=http://localhost:5000/api` |
 
-## Deploy on Vercel
+For local dev without MongoDB Atlas, set `USE_MEMORY_DB=true` in `backend/.env`.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Login (dev)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Email | Password |
+|-------|----------|
+| `admin@noor.om` | `Password123!` |
+
+## Docs
+
+- [Frontend structure](frontend/docs/STRUCTURE.md)
+- [Component format (template / script / style)](frontend/docs/COMPONENTS.md)
+- [Backend API](backend/README.md)
