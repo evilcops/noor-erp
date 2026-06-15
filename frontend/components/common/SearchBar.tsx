@@ -1,7 +1,7 @@
 "use client";
 
 import { Search, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface SearchBarProps {
   value: string;
@@ -17,15 +17,22 @@ export function SearchBar({
   debounceMs = 300,
 }: SearchBarProps) {
   const [local, setLocal] = useState(value);
+  const onChangeRef = useRef(onChange);
 
-  useEffect(() => setLocal(value), [value]);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
+    setLocal(value);
+  }, [value]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (local !== value) onChange(local);
+      if (local !== value) onChangeRef.current(local);
     }, debounceMs);
     return () => clearTimeout(timer);
-  }, [local, debounceMs, onChange, value]);
+  }, [local, debounceMs, value]);
 
   return (
     <div className="relative">

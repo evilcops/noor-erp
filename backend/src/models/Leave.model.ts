@@ -1,4 +1,5 @@
 import mongoose, { Schema, type Document, type Model } from "mongoose";
+import { softDeletePlugin } from "./plugins/softDelete.js";
 
 export interface ILeave extends Document {
   employeeId: mongoose.Types.ObjectId;
@@ -14,8 +15,11 @@ export interface ILeave extends Document {
   approvedAt?: Date;
   rejectionReason?: string;
   attachmentUrl?: string;
+  createdBy?: mongoose.Types.ObjectId;
+  updatedBy?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
+  deletedAt?: Date | null;
 }
 
 const leaveSchema = new Schema<ILeave>(
@@ -41,9 +45,13 @@ const leaveSchema = new Schema<ILeave>(
     approvedAt: Date,
     rejectionReason: String,
     attachmentUrl: String,
+    createdBy: { type: Schema.Types.ObjectId, ref: "User" },
+    updatedBy: { type: Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true }
 );
+
+leaveSchema.plugin(softDeletePlugin);
 
 export const Leave: Model<ILeave> =
   mongoose.models.Leave ?? mongoose.model<ILeave>("Leave", leaveSchema);

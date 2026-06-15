@@ -13,6 +13,7 @@ const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   ],
   hr_manager: [
     "company:view", "branch:view", "employee:*", "attendance:view", "attendance:create",
+    "attendance:edit", "attendance:delete", "attendance:approve",
     "leave:*", "recruitment:*", "performance:*", "notification:view", "report:*",
   ],
   employee: [

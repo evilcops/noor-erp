@@ -4,7 +4,11 @@ import { authenticate } from "../middleware/auth.js";
 import { auditMiddleware } from "../middleware/audit.js";
 import { requirePermission } from "../middleware/permission.js";
 import { validate } from "../middleware/validation.js";
-import { leaveRequestSchema, rejectLeaveSchema } from "../schemas/leave.schema.js";
+import {
+  leaveRequestSchema,
+  rejectLeaveSchema,
+  updateLeaveSchema,
+} from "../schemas/leave.schema.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
 const router = Router();
@@ -22,6 +26,17 @@ router.get("/", requirePermission("leave", "view"), asyncHandler(leaveController
 router.get("/balance", requirePermission("leave", "view"), asyncHandler(leaveController.getLeaveBalance));
 router.get("/calendar", requirePermission("leave", "view"), asyncHandler(leaveController.getLeaveCalendar));
 router.get("/:id", requirePermission("leave", "view"), asyncHandler(leaveController.getLeave));
+router.put(
+  "/:id",
+  requirePermission("leave", "edit"),
+  validate(updateLeaveSchema),
+  asyncHandler(leaveController.updateLeave)
+);
+router.delete(
+  "/:id",
+  requirePermission("leave", "delete"),
+  asyncHandler(leaveController.deleteLeave)
+);
 router.put(
   "/:id/approve",
   requirePermission("leave", "approve"),

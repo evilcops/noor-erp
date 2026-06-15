@@ -1,4 +1,5 @@
 import mongoose, { Schema, type Document, type Model } from "mongoose";
+import { softDeletePlugin } from "./plugins/softDelete.js";
 
 export interface IAttendance extends Document {
   employeeId: mongoose.Types.ObjectId;
@@ -36,8 +37,11 @@ export interface IAttendance extends Document {
   };
   approvedBy?: mongoose.Types.ObjectId;
   notes?: string;
+  createdBy?: mongoose.Types.ObjectId;
+  updatedBy?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
+  deletedAt?: Date | null;
 }
 
 const attendanceSchema = new Schema<IAttendance>(
@@ -82,11 +86,14 @@ const attendanceSchema = new Schema<IAttendance>(
     },
     approvedBy: { type: Schema.Types.ObjectId, ref: "User" },
     notes: String,
+    createdBy: { type: Schema.Types.ObjectId, ref: "User" },
+    updatedBy: { type: Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true }
 );
 
 attendanceSchema.index({ employeeId: 1, date: 1 }, { unique: true });
+attendanceSchema.plugin(softDeletePlugin);
 
 export const Attendance: Model<IAttendance> =
   mongoose.models.Attendance ??

@@ -1,5 +1,5 @@
 import {
-  Briefcase,
+  // Briefcase,
   Building2,
   Calendar,
   Clock,
@@ -7,7 +7,7 @@ import {
   Home,
   Settings,
   Shield,
-  TrendingUp,
+  // TrendingUp,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -30,8 +30,8 @@ export const MAIN_NAV: NavItem[] = [
   { title: "Employees", href: "/employees", icon: Users },
   { title: "Attendance", href: "/attendance", icon: Clock },
   { title: "Leave", href: "/leave", icon: Calendar },
-  { title: "Recruitment", href: "/recruitment", icon: Briefcase },
-  { title: "Performance", href: "/performance", icon: TrendingUp },
+  // { title: "Recruitment", href: "/recruitment", icon: Briefcase },
+  // { title: "Performance", href: "/performance", icon: TrendingUp },
 ];
 
 export const SETTINGS_NAV: NavItem[] = [

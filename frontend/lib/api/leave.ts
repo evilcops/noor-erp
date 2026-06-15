@@ -20,17 +20,43 @@ export interface LeaveBalance {
   unpaid: { total: number; used: number; remaining: number };
 }
 
+export interface LeaveInput {
+  employeeId?: string;
+  type: string;
+  startDate: string;
+  endDate: string;
+  reason?: string;
+  status?: string;
+  attachmentUrl?: string;
+}
+
 export const leaveApi = {
-  getBalance: (params: { year?: number } = {}) =>
+  getBalance: (params: { employeeId?: string; year?: number } = {}) =>
     apiRequest<LeaveBalance>(`/leaves/balance${buildQuery(params)}`),
 
-  request: (data: { type: string; startDate: string; endDate: string; reason: string }) =>
+  request: (data: LeaveInput) =>
     apiRequest<LeaveRequest>("/leaves/request", { method: "POST", body: JSON.stringify(data) }),
 
-  list: (params: { status?: string; fromDate?: string; toDate?: string; page?: number; limit?: number } = {}) =>
+  list: (params: {
+    status?: string;
+    branchId?: string;
+    employeeId?: string;
+    fromDate?: string;
+    toDate?: string;
+    page?: number;
+    limit?: number;
+  } = {}) =>
     apiRequestWithMeta<LeaveRequest[]>(`/leaves${buildQuery(params)}`),
 
-  getCalendar: (params: { fromDate?: string; toDate?: string } = {}) =>
+  getById: (id: string) => apiRequest<LeaveRequest>(`/leaves/${id}`),
+
+  update: (id: string, data: Partial<LeaveInput>) =>
+    apiRequest<LeaveRequest>(`/leaves/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+
+  delete: (id: string) =>
+    apiRequest<{ message: string }>(`/leaves/${id}`, { method: "DELETE" }),
+
+  getCalendar: (params: { branchId?: string; employeeId?: string; fromDate?: string; toDate?: string } = {}) =>
     apiRequest<LeaveRequest[]>(`/leaves/calendar${buildQuery(params)}`),
 
   approve: (id: string) =>

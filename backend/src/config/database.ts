@@ -1,5 +1,12 @@
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import mongoose from "mongoose";
 import { logger } from "../utils/logger.js";
+
+const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const PERSISTENT_MEMORY_DB_PATH =
+  process.env.MEMORY_DB_PATH ?? path.join(backendRoot, ".data", "mongo");
 
 let memoryServer: { stop: () => Promise<boolean>; getUri: () => string } | null = null;
 
@@ -39,9 +46,15 @@ export function getMongoUri(): string {
 async function resolveUri(): Promise<string> {
   if (process.env.USE_MEMORY_DB === "true" || process.env.MONGODB_URI === "memory://") {
     const { MongoMemoryServer } = await import("mongodb-memory-server");
-    memoryServer = await MongoMemoryServer.create();
+    fs.mkdirSync(PERSISTENT_MEMORY_DB_PATH, { recursive: true });
+    memoryServer = await MongoMemoryServer.create({
+      instance: { dbPath: PERSISTENT_MEMORY_DB_PATH },
+    });
     const uri = memoryServer.getUri("noor_erp");
-    logger.info("Using in-memory MongoDB (dev only)", { uri: maskUri(uri) });
+    logger.info("Using file-backed dev MongoDB", {
+      uri: maskUri(uri),
+      dbPath: PERSISTENT_MEMORY_DB_PATH,
+    });
     return uri;
   }
   return getMongoUri();

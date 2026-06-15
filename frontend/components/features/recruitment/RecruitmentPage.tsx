@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LayoutGrid, List, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -25,7 +25,7 @@ const PIPELINE: CandidateStatus[] = [
 ];
 
 export function RecruitmentPage() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const { branches, activeBranchId } = useBranch();
   const { can } = usePermissions();
   const qc = useQueryClient();
@@ -36,20 +36,46 @@ export function RecruitmentPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [selected, setSelected] = useState<Candidate | null>(null);
   const [detailTab, setDetailTab] = useState("info");
-  const [form, setForm] = useState({ position: "", department: "", candidateName: "", candidateEmail: "", candidatePhone: "", notes: "", source: "website" });
+  const [form, setForm] = useState({
+    position: "",
+    department: "",
+    candidateName: "",
+    candidateEmail: "",
+    candidatePhone: "",
+    notes: "",
+    source: "website",
+  });
 
-  const { data, isLoading } = useQuery({
+  const activeBranch = useMemo(
+    () => branches.find((b) => b._id === activeBranchId),
+    [branches, activeBranchId]
+  );
+
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["candidates", search],
-    queryFn: () => recruitmentApi.getCandidates({ search, limit: 100 }),
+    queryFn: () => recruitmentApi.getCandidates({ search: search || undefined, limit: 100 }),
+    enabled: !authLoading && !!user,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
   const createMut = useMutation({
-    mutationFn: () => recruitmentApi.create({
-      ...form,
-      companyId: user!.companyId!,
-      branchId: activeBranchId!,
-    }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["candidates"] }); toast.success("Candidate added"); setAddOpen(false); },
+    mutationFn: () => {
+      const companyId = user?.companyId ?? activeBranch?.companyId;
+      if (!companyId || !activeBranchId) {
+        throw new Error("Select a branch before adding a candidate");
+      }
+      return recruitmentApi.create({
+        ...form,
+        companyId,
+        branchId: activeBranchId,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["candidates"] });
+      toast.success("Candidate added");
+      setAddOpen(false);
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -61,17 +87,23 @@ export function RecruitmentPage() {
   });
 
   const columns: Column<Candidate>[] = [
-    { key: "name", header: "Name", cell: (r) => r.candidateName },
-    { key: "email", header: "Email", cell: (r) => r.candidateEmail },
+    { key: "name", header: "Name", cell: (r) => r.candidateName ?? "—" },
+    { key: "email", header: "Email", cell: (r) => r.candidateEmail ?? "—" },
     { key: "phone", header: "Phone", cell: (r) => r.candidatePhone ?? "—" },
-    { key: "position", header: "Position", cell: (r) => r.position },
+    { key: "position", header: "Position", cell: (r) => r.position ?? "—" },
     { key: "status", header: "Status", cell: (r) => <StatusBadge status={r.status} /> },
-    { key: "date", header: "Applied", cell: (r) => new Date(r.createdAt).toLocaleDateString() },
+    {
+      key: "date",
+      header: "Applied",
+      cell: (r) => (r.createdAt ? new Date(r.createdAt).toLocaleDateString() : "—"),
+    },
     {
       key: "actions",
       header: "Actions",
       cell: (r) => (
-        <Button variant="ghost" onClick={() => { setSelected(r); setDetailOpen(true); }}>View</Button>
+        <Button variant="ghost" onClick={() => { setSelected(r); setDetailOpen(true); }}>
+          View
+        </Button>
       ),
     },
   ];
@@ -91,13 +123,24 @@ export function RecruitmentPage() {
         }
       />
 
+      {isError ? (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
+          Could not load candidates. Ensure the backend is running.
+          <Button variant="ghost" onClick={() => refetch()} className="ml-2">Retry</Button>
+        </div>
+      ) : null}
+
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="min-w-[200px] flex-1">
           <SearchBar value={search} onChange={setSearch} placeholder="Search candidates..." />
         </div>
         <div className="flex rounded-lg border border-border">
-          <button onClick={() => setView("kanban")} className={`px-3 py-2 ${view === "kanban" ? "bg-muted" : ""}`}><LayoutGrid className="h-4 w-4" /></button>
-          <button onClick={() => setView("table")} className={`px-3 py-2 ${view === "table" ? "bg-muted" : ""}`}><List className="h-4 w-4" /></button>
+          <button type="button" onClick={() => setView("kanban")} className={`px-3 py-2 ${view === "kanban" ? "bg-muted" : ""}`}>
+            <LayoutGrid className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={() => setView("table")} className={`px-3 py-2 ${view === "table" ? "bg-muted" : ""}`}>
+            <List className="h-4 w-4" />
+          </button>
         </div>
       </div>
 
@@ -118,7 +161,9 @@ export function RecruitmentPage() {
                   >
                     <p className="font-medium text-sm">{c.candidateName}</p>
                     <p className="text-xs text-muted-foreground">{c.position}</p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">{new Date(c.createdAt).toLocaleDateString()}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : "—"}
+                    </p>
                     {can("recruitment:edit") ? (
                       <select
                         className="mt-2 w-full rounded border border-border text-xs"
@@ -136,7 +181,12 @@ export function RecruitmentPage() {
           ))}
         </div>
       ) : (
-        <DataTable columns={columns} data={candidates} loading={isLoading} onRowClick={(r) => { setSelected(r); setDetailOpen(true); }} />
+        <DataTable
+          columns={columns}
+          data={candidates}
+          loading={isLoading || authLoading}
+          onRowClick={(r) => { setSelected(r); setDetailOpen(true); }}
+        />
       )}
 
       <Modal open={addOpen} onOpenChange={setAddOpen} title="Add Candidate" footer={

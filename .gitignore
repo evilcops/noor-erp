@@ -39,6 +39,7 @@ yarn-error.log*
 
 # backend build
 backend/dist/
+backend/.data/
 
 # vercel
 .vercel

@@ -46,11 +46,13 @@ export async function generateAttendanceReport(
 ) {
   const query: FilterQuery<typeof Attendance> = {
     ...buildTenantFilter(user),
+    deletedAt: null,
   };
   if (filters.branchId) query.branchId = filters.branchId;
+  if (filters.employeeId) query.employeeId = filters.employeeId;
   if (filters.status) query.status = filters.status;
   applyDateRange(query, filters.fromDate, filters.toDate, "date");
-  return Attendance.find(query).sort({ date: -1 }).populate("employeeId", "firstName lastName employeeId").lean();
+  return Attendance.find(query).sort({ date: -1 }).populate("employeeId", "firstName lastName employeeId department").lean();
 }
 
 export async function generateLeaveReport(
