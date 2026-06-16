@@ -49,11 +49,9 @@ export function Modal({
               <Dialog.Title className="text-lg font-semibold text-foreground">
                 {title}
               </Dialog.Title>
-              {description ? (
-                <Dialog.Description className="mt-1 text-sm text-muted-foreground">
-                  {description}
-                </Dialog.Description>
-              ) : null}
+              <Dialog.Description className={description ? "mt-1 text-sm text-muted-foreground" : "sr-only"}>
+                {description ?? title}
+              </Dialog.Description>
             </div>
             <Dialog.Close className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
               <X className="h-5 w-5" />

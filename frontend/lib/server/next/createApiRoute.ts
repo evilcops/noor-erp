@@ -214,7 +214,9 @@ export interface ApiRouteOptions {
 function createHandler(options: ApiRouteOptions) {
   return async (
     request: NextRequest,
-    context?: { params?: Promise<Record<string, string>> | Record<string, string> }
+    context: { params?: Promise<Record<string, string>> | Record<string, string> } = {
+      params: Promise.resolve({}),
+    }
   ): Promise<NextResponse> => {
     await connectDatabase();
     await ensureDevAdminOnce();
