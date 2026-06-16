@@ -2,19 +2,19 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
-const PUBLIC_PATHS = [
-  "/login",
-  "/register",
-];
+const PUBLIC_PATHS = ["/login", "/register"];
 const AUTH_PATHS = ["/login", "/register"];
 
 function getSecrets(): Uint8Array[] {
-  const secrets = [
+  return [
+    process.env.JWT_SECRET,
     process.env.JWT_ACCESS_SECRET,
     process.env.EXPRESS_JWT_SECRET,
+    "dev-jwt-secret-change-in-production-32chars",
     "your-super-secret-key-change-this-min-32-chars",
-  ].filter(Boolean) as string[];
-  return secrets.map((s) => new TextEncoder().encode(s));
+  ]
+    .filter(Boolean)
+    .map((secret) => new TextEncoder().encode(secret as string));
 }
 
 async function isValidAccessToken(token: string): Promise<boolean> {
@@ -35,6 +35,7 @@ export async function middleware(request: NextRequest) {
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
+    pathname.startsWith("/api/") ||
     pathname.match(/\.(svg|png|jpg|jpeg|gif|webp)$/)
   ) {
     return NextResponse.next();
@@ -44,23 +45,29 @@ export async function middleware(request: NextRequest) {
     (path) => pathname === path || pathname.startsWith(`${path}/`)
   );
 
-  const accessToken =
+  const rawToken =
     request.cookies.get("noor_api_access")?.value ??
     request.cookies.get("noor_access_token")?.value;
-  const isAuthenticated = accessToken
-    ? await isValidAccessToken(accessToken)
-    : false;
+  const accessToken = rawToken
+    ? (() => {
+        try {
+          return decodeURIComponent(rawToken);
+        } catch {
+          return rawToken;
+        }
+      })()
+    : undefined;
+  const isAuthenticated = accessToken ? await isValidAccessToken(accessToken) : false;
 
   if (AUTH_PATHS.includes(pathname) && isAuthenticated) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
   if (!isPublic && !isAuthenticated) {
-    if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
     const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("from", pathname);
+    if (pathname !== "/") {
+      loginUrl.searchParams.set("from", pathname);
+    }
     return NextResponse.redirect(loginUrl);
   }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -10,9 +10,8 @@ import { authApi } from "@/lib/api/auth";
 import { useAuth } from "@/hooks";
 
 export function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const { setUser } = useAuth();
+  const { refreshUser } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -24,12 +23,11 @@ export function LoginForm() {
     setLoading(true);
 
     try {
-      const data = await authApi.login(email, password);
-      setUser({ ...data.user, permissions: [] });
+      await authApi.login(email, password);
+      await refreshUser();
       toast.success("Welcome back!");
       const redirectTo = searchParams.get("from") || "/";
-      router.push(redirectTo);
-      router.refresh();
+      window.location.href = redirectTo;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Login failed";
       setError(message);

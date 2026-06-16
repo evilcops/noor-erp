@@ -1,12 +1,3 @@
-export type {
-  Company,
-  Branch,
-  User,
-  RefreshToken,
-  UserRole,
-  RecordStatus,
-} from "@prisma/client";
-
 export interface AuthUser {
   id: string;
   email: string;

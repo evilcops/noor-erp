@@ -1,5 +1,5 @@
 import {
-  // Briefcase,
+  Briefcase,
   Building2,
   Calendar,
   Clock,
@@ -30,7 +30,7 @@ export const MAIN_NAV: NavItem[] = [
   { title: "Employees", href: "/employees", icon: Users },
   { title: "Attendance", href: "/attendance", icon: Clock },
   { title: "Leave", href: "/leave", icon: Calendar },
-  // { title: "Recruitment", href: "/recruitment", icon: Briefcase },
+  { title: "Recruitment", href: "/recruitment", icon: Briefcase },
   // { title: "Performance", href: "/performance", icon: TrendingUp },
 ];
 

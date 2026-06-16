@@ -1,13 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LayoutGrid, List, Plus } from "lucide-react";
+import { CalendarClock, LayoutGrid, List, Plus, UserCheck, UserX } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SearchBar } from "@/components/common/SearchBar";
 import { DataTable, type Column } from "@/components/common/DataTable";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import { RecruitmentPipeline } from "@/components/features/recruitment/RecruitmentPipeline";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -16,13 +17,58 @@ import { Select } from "@/components/ui/Select";
 import { Tabs } from "@/components/ui/Tabs";
 import { useAuth, useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
+import { companyApi } from "@/lib/api/companies";
 import { recruitmentApi } from "@/lib/api/recruitment";
+import { cn } from "@/lib/utils";
 import type { Candidate, CandidateStatus } from "@/types/recruitment";
 
 const PIPELINE: CandidateStatus[] = [
-  "new", "shortlisted", "interview_scheduled", "interviewed",
-  "offered", "accepted", "hired", "rejected", "archived",
+  "new",
+  "shortlisted",
+  "interview_scheduled",
+  "interviewed",
+  "offered",
+  "accepted",
+  "hired",
+  "rejected",
+  "archived",
 ];
+
+const STATUS_FILTER = [
+  { value: "", label: "All statuses" },
+  ...PIPELINE.map((s) => ({ value: s, label: s.replace(/_/g, " ") })),
+];
+
+const emptyCandidateForm = {
+  position: "",
+  department: "",
+  candidateName: "",
+  candidateEmail: "",
+  candidatePhone: "",
+  notes: "",
+};
+
+const emptyInterviewForm = {
+  date: "",
+  time: "",
+  mode: "in_person" as "online" | "in_person",
+  meetingLink: "",
+};
+
+const emptyFeedbackForm = {
+  rating: "3",
+  feedback: "",
+};
+
+function formatInterviewDate(value?: string) {
+  if (!value) return "—";
+  return new Date(value).toLocaleDateString(undefined, {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
 
 export function RecruitmentPage() {
   const { user, isLoading: authLoading } = useAuth();
@@ -32,49 +78,102 @@ export function RecruitmentPage() {
 
   const [view, setView] = useState<"kanban" | "table">("kanban");
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [branchFilter, setBranchFilter] = useState("");
+
   const [addOpen, setAddOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+
   const [selected, setSelected] = useState<Candidate | null>(null);
-  const [detailTab, setDetailTab] = useState("info");
-  const [form, setForm] = useState({
-    position: "",
-    department: "",
-    candidateName: "",
-    candidateEmail: "",
-    candidatePhone: "",
-    notes: "",
-    source: "website",
-  });
+  const [detailTab, setDetailTab] = useState("overview");
+
+  const [form, setForm] = useState(emptyCandidateForm);
+  const [addCompanyId, setAddCompanyId] = useState("");
+  const [addBranchId, setAddBranchId] = useState("");
+
+  const [interviewForm, setInterviewForm] = useState(emptyInterviewForm);
+  const [feedbackForm, setFeedbackForm] = useState(emptyFeedbackForm);
+
+  const isSuperAdmin = user?.role === "super_admin";
 
   const activeBranch = useMemo(
     () => branches.find((b) => b._id === activeBranchId),
     [branches, activeBranchId]
   );
 
+  const { data: companiesData } = useQuery({
+    queryKey: ["companies"],
+    queryFn: () => companyApi.getAll(),
+    enabled: isSuperAdmin && !!user,
+  });
+
+  const companies = companiesData?.data ?? [];
+
+  const addBranchOptions = useMemo(() => {
+    const companyId = addCompanyId || user?.companyId || activeBranch?.companyId;
+    if (!companyId) return branches;
+    return branches.filter((b) => b.companyId === companyId);
+  }, [addCompanyId, branches, user?.companyId, activeBranch?.companyId]);
+
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["candidates", search],
-    queryFn: () => recruitmentApi.getCandidates({ search: search || undefined, limit: 100 }),
+    queryKey: ["candidates", search, statusFilter, branchFilter, activeBranchId],
+    queryFn: () =>
+      recruitmentApi.getCandidates({
+        search: search || undefined,
+        status: statusFilter || undefined,
+        branchId: branchFilter || activeBranchId || undefined,
+        limit: 100,
+      }),
     enabled: !authLoading && !!user,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
   });
 
+  useEffect(() => {
+    if (!selected) return;
+    setInterviewForm({
+      date: selected.interviewSchedule?.date?.slice(0, 10) ?? "",
+      time: selected.interviewSchedule?.time ?? "",
+      mode: (selected.interviewSchedule?.mode as "online" | "in_person") ?? "in_person",
+      meetingLink: selected.interviewSchedule?.meetingLink ?? "",
+    });
+    setFeedbackForm({
+      rating: String(selected.interviewSchedule?.rating ?? 3),
+      feedback: selected.interviewSchedule?.feedback ?? "",
+    });
+  }, [selected]);
+
+  const refreshSelected = async (id: string) => {
+    const updated = await recruitmentApi.getById(id);
+    setSelected(updated);
+  };
+
   const createMut = useMutation({
     mutationFn: () => {
-      const companyId = user?.companyId ?? activeBranch?.companyId;
-      if (!companyId || !activeBranchId) {
-        throw new Error("Select a branch before adding a candidate");
+      const companyId =
+        addCompanyId || user?.companyId || activeBranch?.companyId;
+      const branchId = addBranchId || activeBranchId;
+      if (!companyId || !branchId) {
+        throw new Error("Select a company and branch before adding a candidate");
+      }
+      if (!form.position || !form.candidateName || !form.candidateEmail) {
+        throw new Error("Position, name, and email are required");
       }
       return recruitmentApi.create({
         ...form,
         companyId,
-        branchId: activeBranchId,
+        branchId,
       });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["candidates"] });
       toast.success("Candidate added");
       setAddOpen(false);
+      setForm(emptyCandidateForm);
+      setAddCompanyId("");
+      setAddBranchId("");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -82,16 +181,97 @@ export function RecruitmentPage() {
   const statusMut = useMutation({
     mutationFn: ({ id, status }: { id: string; status: CandidateStatus }) =>
       recruitmentApi.updateStatus(id, status),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["candidates"] }),
+    onSuccess: async (_, { id }) => {
+      qc.invalidateQueries({ queryKey: ["candidates"] });
+      if (selected?._id === id) await refreshSelected(id);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const scheduleMut = useMutation({
+    mutationFn: (id: string) => {
+      if (!interviewForm.date || !interviewForm.time) {
+        throw new Error("Interview date and time are required");
+      }
+      if (interviewForm.mode === "online" && !interviewForm.meetingLink.trim()) {
+        throw new Error("Meeting link is required for online interviews");
+      }
+      return recruitmentApi.scheduleInterview(id, {
+        date: interviewForm.date,
+        time: interviewForm.time,
+        mode: interviewForm.mode,
+        meetingLink: interviewForm.meetingLink || undefined,
+        interviewerId: user?.id,
+      });
+    },
+    onSuccess: async (_, id) => {
+      qc.invalidateQueries({ queryKey: ["candidates"] });
+      toast.success("Interview scheduled");
+      await refreshSelected(id);
+      setDetailTab("interview");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const feedbackMut = useMutation({
+    mutationFn: (id: string) => {
+      if (!feedbackForm.feedback.trim()) {
+        throw new Error("Interview feedback is required");
+      }
+      return recruitmentApi.interviewFeedback(id, {
+        feedback: feedbackForm.feedback.trim(),
+        rating: Number(feedbackForm.rating),
+      });
+    },
+    onSuccess: async (_, id) => {
+      qc.invalidateQueries({ queryKey: ["candidates"] });
+      toast.success("Interview feedback saved");
+      await refreshSelected(id);
+      setDetailTab("decision");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const hireMut = useMutation({
+    mutationFn: (id: string) => recruitmentApi.convertToEmployee(id),
+    onSuccess: async (_, id) => {
+      qc.invalidateQueries({ queryKey: ["candidates"] });
+      qc.invalidateQueries({ queryKey: ["employees"] });
+      toast.success("Candidate hired and added as employee");
+      await refreshSelected(id);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const rejectMut = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      recruitmentApi.update(id, {
+        status: "rejected",
+        notes: reason || "Not selected after interview",
+      }),
+    onSuccess: async (_, { id }) => {
+      qc.invalidateQueries({ queryKey: ["candidates"] });
+      toast.success("Candidate rejected");
+      setRejectOpen(false);
+      setRejectReason("");
+      await refreshSelected(id);
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const columns: Column<Candidate>[] = [
     { key: "name", header: "Name", cell: (r) => r.candidateName ?? "—" },
     { key: "email", header: "Email", cell: (r) => r.candidateEmail ?? "—" },
-    { key: "phone", header: "Phone", cell: (r) => r.candidatePhone ?? "—" },
     { key: "position", header: "Position", cell: (r) => r.position ?? "—" },
     { key: "status", header: "Status", cell: (r) => <StatusBadge status={r.status} /> },
+    {
+      key: "interview",
+      header: "Interview",
+      cell: (r) =>
+        r.interviewSchedule?.date
+          ? `${formatInterviewDate(r.interviewSchedule.date)} ${r.interviewSchedule.time ?? ""}`
+          : "—",
+    },
     {
       key: "date",
       header: "Applied",
@@ -101,32 +281,51 @@ export function RecruitmentPage() {
       key: "actions",
       header: "Actions",
       cell: (r) => (
-        <Button variant="ghost" onClick={() => { setSelected(r); setDetailOpen(true); }}>
-          View
+        <Button
+          variant="ghost"
+          onClick={() => {
+            setSelected(r);
+            setDetailTab("overview");
+            setDetailOpen(true);
+          }}
+        >
+          Manage
         </Button>
       ),
     },
   ];
 
   const candidates = data?.data ?? [];
+  const canManage = can("recruitment:edit") || can("recruitment:create");
+
+  const openCandidate = (candidate: Candidate) => {
+    setSelected(candidate);
+    setDetailTab("overview");
+    setDetailOpen(true);
+  };
 
   return (
     <div>
       <PageHeader
         title="Recruitment"
-        description="Manage your hiring pipeline from application to hire."
+        description="Schedule interviews, record feedback, and hire or reject candidates."
         breadcrumbs={[{ label: "Dashboard", href: "/" }, { label: "Recruitment" }]}
         actions={
           can("recruitment:create") ? (
-            <Button onClick={() => setAddOpen(true)}><Plus className="mr-2 h-4 w-4" />Add Candidate</Button>
+            <Button onClick={() => setAddOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Candidate
+            </Button>
           ) : undefined
         }
       />
 
       {isError ? (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
-          Could not load candidates. Ensure the backend is running.
-          <Button variant="ghost" onClick={() => refetch()} className="ml-2">Retry</Button>
+          Could not load candidates.
+          <Button variant="ghost" onClick={() => refetch()} className="ml-2">
+            Retry
+          </Button>
         </div>
       ) : null}
 
@@ -134,133 +333,456 @@ export function RecruitmentPage() {
         <div className="min-w-[200px] flex-1">
           <SearchBar value={search} onChange={setSearch} placeholder="Search candidates..." />
         </div>
-        <div className="flex rounded-lg border border-border">
-          <button type="button" onClick={() => setView("kanban")} className={`px-3 py-2 ${view === "kanban" ? "bg-muted" : ""}`}>
+        <Select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          options={STATUS_FILTER}
+          className="w-44"
+        />
+        <Select
+          value={branchFilter}
+          onChange={(e) => setBranchFilter(e.target.value)}
+          options={[
+            { value: "", label: "All branches" },
+            ...branches.map((b) => ({ value: b._id, label: b.name })),
+          ]}
+          className="w-48"
+        />
+        <div className="inline-flex rounded-lg border border-border bg-card p-1 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setView("kanban")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
+              view === "kanban"
+                ? "bg-brand text-brand-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-muted"
+            )}
+            title="Pipeline view"
+          >
             <LayoutGrid className="h-4 w-4" />
+            Pipeline
           </button>
-          <button type="button" onClick={() => setView("table")} className={`px-3 py-2 ${view === "table" ? "bg-muted" : ""}`}>
+          <button
+            type="button"
+            onClick={() => setView("table")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
+              view === "table"
+                ? "bg-brand text-brand-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-muted"
+            )}
+            title="Table view"
+          >
             <List className="h-4 w-4" />
+            Table
           </button>
         </div>
       </div>
 
       {view === "kanban" ? (
-        <div className="flex gap-4 overflow-x-auto pb-4">
-          {PIPELINE.map((status) => (
-            <div key={status} className="min-w-[220px] flex-shrink-0 rounded-xl border border-border bg-muted/30 p-3">
-              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {status.replace(/_/g, " ")}
-                <span className="ml-1 text-foreground">({candidates.filter((c) => c.status === status).length})</span>
-              </h3>
-              <div className="space-y-2">
-                {candidates.filter((c) => c.status === status).map((c) => (
-                  <div
-                    key={c._id}
-                    className="cursor-pointer rounded-lg border border-border bg-card p-3 shadow-sm hover:shadow"
-                    onClick={() => { setSelected(c); setDetailOpen(true); }}
-                  >
-                    <p className="font-medium text-sm">{c.candidateName}</p>
-                    <p className="text-xs text-muted-foreground">{c.position}</p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : "—"}
-                    </p>
-                    {can("recruitment:edit") ? (
-                      <select
-                        className="mt-2 w-full rounded border border-border text-xs"
-                        value={c.status}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => statusMut.mutate({ id: c._id, status: e.target.value as CandidateStatus })}
-                      >
-                        {PIPELINE.map((s) => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}
-                      </select>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+        <RecruitmentPipeline
+          candidates={candidates}
+          loading={isLoading || authLoading}
+          onSelect={openCandidate}
+        />
       ) : (
         <DataTable
           columns={columns}
           data={candidates}
           loading={isLoading || authLoading}
-          onRowClick={(r) => { setSelected(r); setDetailOpen(true); }}
+          onRowClick={openCandidate}
         />
       )}
 
-      <Modal open={addOpen} onOpenChange={setAddOpen} title="Add Candidate" footer={
-        <>
-          <Button variant="secondary" onClick={() => setAddOpen(false)}>Cancel</Button>
-          <Button loading={createMut.isPending} onClick={() => createMut.mutate()}>Add</Button>
-        </>
-      }>
+      <Modal
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        title="Add Candidate"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setAddOpen(false)}>
+              Cancel
+            </Button>
+            <Button loading={createMut.isPending} onClick={() => createMut.mutate()}>
+              Add
+            </Button>
+          </>
+        }
+      >
         <div className="grid gap-4 sm:grid-cols-2">
-          <div><Label>Position *</Label><Input value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} /></div>
-          <div><Label>Department</Label><Input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} /></div>
-          <div><Label>Name *</Label><Input value={form.candidateName} onChange={(e) => setForm({ ...form, candidateName: e.target.value })} /></div>
-          <div><Label>Email *</Label><Input type="email" value={form.candidateEmail} onChange={(e) => setForm({ ...form, candidateEmail: e.target.value })} /></div>
-          <div><Label>Phone</Label><Input value={form.candidatePhone} onChange={(e) => setForm({ ...form, candidatePhone: e.target.value })} /></div>
-          <div><Label>Source</Label><Select value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} options={[
-            { value: "linkedin", label: "LinkedIn" }, { value: "indeed", label: "Indeed" },
-            { value: "referral", label: "Referral" }, { value: "website", label: "Website" }, { value: "other", label: "Other" },
-          ]} /></div>
-          <div className="sm:col-span-2"><Label>Notes</Label><textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} className="w-full rounded-lg border border-border px-3 py-2 text-sm" /></div>
+          {isSuperAdmin ? (
+            <>
+              <div>
+                <Label>Company *</Label>
+                <Select
+                  value={addCompanyId}
+                  onChange={(e) => {
+                    setAddCompanyId(e.target.value);
+                    setAddBranchId("");
+                  }}
+                  options={[
+                    { value: "", label: "Select company" },
+                    ...companies.map((c) => ({ value: c._id, label: c.name })),
+                  ]}
+                />
+              </div>
+              <div>
+                <Label>Branch *</Label>
+                <Select
+                  value={addBranchId}
+                  onChange={(e) => setAddBranchId(e.target.value)}
+                  options={[
+                    { value: "", label: "Select branch" },
+                    ...addBranchOptions.map((b) => ({ value: b._id, label: b.name })),
+                  ]}
+                />
+              </div>
+            </>
+          ) : null}
+          <div>
+            <Label>Position *</Label>
+            <Input
+              value={form.position}
+              onChange={(e) => setForm({ ...form, position: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>Department</Label>
+            <Input
+              value={form.department}
+              onChange={(e) => setForm({ ...form, department: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>Name *</Label>
+            <Input
+              value={form.candidateName}
+              onChange={(e) => setForm({ ...form, candidateName: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>Email *</Label>
+            <Input
+              type="email"
+              value={form.candidateEmail}
+              onChange={(e) => setForm({ ...form, candidateEmail: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label>Phone</Label>
+            <Input
+              value={form.candidatePhone}
+              onChange={(e) => setForm({ ...form, candidatePhone: e.target.value })}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <Label>Notes</Label>
+            <textarea
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              rows={3}
+              className="w-full rounded-lg border border-border px-3 py-2 text-sm"
+            />
+          </div>
         </div>
       </Modal>
 
-      <Modal open={detailOpen} onOpenChange={setDetailOpen} title={selected?.candidateName ?? "Candidate"} size="xl">
+      <Modal
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        title={selected?.candidateName ?? "Candidate"}
+        size="xl"
+      >
         {selected ? (
           <>
-            <Tabs tabs={[
-              { id: "info", label: "Information" },
-              { id: "interview", label: "Interview" },
-              { id: "feedback", label: "Feedback" },
-              { id: "offer", label: "Offer" },
-            ]} activeTab={detailTab} onChange={setDetailTab} className="mb-4" />
-            {detailTab === "info" ? (
-              <div className="space-y-2 text-sm">
-                <p><span className="text-muted-foreground">Position:</span> {selected.position}</p>
-                <p><span className="text-muted-foreground">Email:</span> {selected.candidateEmail}</p>
-                <p><span className="text-muted-foreground">Phone:</span> {selected.candidatePhone ?? "—"}</p>
-                <StatusBadge status={selected.status} />
-                {selected.resumeUrl ? <a href={selected.resumeUrl} className="text-brand underline">Download Resume</a> : null}
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <StatusBadge status={selected.status} />
+              <span className="text-sm text-muted-foreground">{selected.position}</span>
+            </div>
+
+            <Tabs
+              tabs={[
+                { id: "overview", label: "Overview" },
+                { id: "interview", label: "Schedule Interview" },
+                { id: "feedback", label: "Interview Feedback" },
+                { id: "decision", label: "Hire / Reject" },
+              ]}
+              activeTab={detailTab}
+              onChange={setDetailTab}
+              className="mb-4"
+            />
+
+            {detailTab === "overview" ? (
+              <div className="space-y-3 text-sm">
+                <p>
+                  <span className="text-muted-foreground">Email:</span> {selected.candidateEmail}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Phone:</span>{" "}
+                  {selected.candidatePhone ?? "—"}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Department:</span>{" "}
+                  {selected.department ?? "—"}
+                </p>
+                {selected.notes ? (
+                  <p>
+                    <span className="text-muted-foreground">Notes:</span> {selected.notes}
+                  </p>
+                ) : null}
+                {canManage && selected.status === "new" ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => statusMut.mutate({ id: selected._id, status: "shortlisted" })}
+                  >
+                    Move to Shortlisted
+                  </Button>
+                ) : null}
               </div>
             ) : null}
-            {detailTab === "interview" && selected.interviewSchedule ? (
-              <div className="text-sm space-y-1">
-                <p>Date: {selected.interviewSchedule.date}</p>
-                <p>Time: {selected.interviewSchedule.time}</p>
-                <p>Mode: {selected.interviewSchedule.mode}</p>
-                {selected.interviewSchedule.meetingLink ? <a href={selected.interviewSchedule.meetingLink} className="text-brand">{selected.interviewSchedule.meetingLink}</a> : null}
+
+            {detailTab === "interview" ? (
+              <div className="space-y-4">
+                {selected.interviewSchedule?.date ? (
+                  <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+                    <p className="font-medium">Current schedule</p>
+                    <p>Date: {formatInterviewDate(selected.interviewSchedule.date)}</p>
+                    <p>Time: {selected.interviewSchedule.time ?? "—"}</p>
+                    <p className="capitalize">Mode: {selected.interviewSchedule.mode ?? "—"}</p>
+                    {selected.interviewSchedule.meetingLink ? (
+                      <a
+                        href={selected.interviewSchedule.meetingLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-brand underline"
+                      >
+                        {selected.interviewSchedule.meetingLink}
+                      </a>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {canManage && !["hired", "rejected", "archived"].includes(selected.status) ? (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <Label>Interview date *</Label>
+                      <Input
+                        type="date"
+                        value={interviewForm.date}
+                        onChange={(e) =>
+                          setInterviewForm({ ...interviewForm, date: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>Interview time *</Label>
+                      <Input
+                        type="time"
+                        value={interviewForm.time}
+                        onChange={(e) =>
+                          setInterviewForm({ ...interviewForm, time: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>Mode *</Label>
+                      <Select
+                        value={interviewForm.mode}
+                        onChange={(e) =>
+                          setInterviewForm({
+                            ...interviewForm,
+                            mode: e.target.value as "online" | "in_person",
+                          })
+                        }
+                        options={[
+                          { value: "in_person", label: "In person" },
+                          { value: "online", label: "Online" },
+                        ]}
+                      />
+                    </div>
+                    <div>
+                      <Label>
+                        Meeting link {interviewForm.mode === "online" ? "*" : "(optional)"}
+                      </Label>
+                      <Input
+                        value={interviewForm.meetingLink}
+                        onChange={(e) =>
+                          setInterviewForm({ ...interviewForm, meetingLink: e.target.value })
+                        }
+                        placeholder="https://meet.google.com/..."
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Button
+                        loading={scheduleMut.isPending}
+                        onClick={() => scheduleMut.mutate(selected._id)}
+                      >
+                        <CalendarClock className="mr-2 h-4 w-4" />
+                        {selected.interviewSchedule?.date ? "Update interview" : "Schedule interview"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Interview scheduling is not available for this candidate status.
+                  </p>
+                )}
               </div>
-            ) : detailTab === "interview" ? <p className="text-sm text-muted-foreground">No interview scheduled.</p> : null}
+            ) : null}
+
             {detailTab === "feedback" ? (
-              <div className="text-sm">
-                {selected.interviewSchedule?.feedback ? <p>{selected.interviewSchedule.feedback}</p> : <p className="text-muted-foreground">No feedback yet.</p>}
-                {selected.interviewSchedule?.rating ? <p>Rating: {selected.interviewSchedule.rating}/5</p> : null}
+              <div className="space-y-4">
+                {selected.status === "interview_scheduled" ||
+                selected.status === "interviewed" ||
+                selected.interviewSchedule?.feedback ? (
+                  canManage && !["hired", "rejected", "archived"].includes(selected.status) ? (
+                    <>
+                      <div>
+                        <Label>Rating (1–5) *</Label>
+                        <Select
+                          value={feedbackForm.rating}
+                          onChange={(e) =>
+                            setFeedbackForm({ ...feedbackForm, rating: e.target.value })
+                          }
+                          options={[1, 2, 3, 4, 5].map((n) => ({
+                            value: String(n),
+                            label: `${n} — ${["Poor", "Fair", "Good", "Very good", "Excellent"][n - 1]}`,
+                          }))}
+                        />
+                      </div>
+                      <div>
+                        <Label>Interview feedback *</Label>
+                        <textarea
+                          value={feedbackForm.feedback}
+                          onChange={(e) =>
+                            setFeedbackForm({ ...feedbackForm, feedback: e.target.value })
+                          }
+                          rows={5}
+                          placeholder="Summarize the interview: strengths, concerns, recommendation..."
+                          className="w-full rounded-lg border border-border px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <Button
+                        loading={feedbackMut.isPending}
+                        onClick={() => feedbackMut.mutate(selected._id)}
+                      >
+                        Save interview feedback
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="text-sm">
+                      {selected.interviewSchedule?.feedback ? (
+                        <>
+                          <p className="mb-2 font-medium">
+                            Rating: {selected.interviewSchedule.rating ?? "—"}/5
+                          </p>
+                          <p>{selected.interviewSchedule.feedback}</p>
+                        </>
+                      ) : (
+                        <p className="text-muted-foreground">No feedback recorded yet.</p>
+                      )}
+                    </div>
+                  )
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Schedule an interview first, then record feedback after conducting it.
+                  </p>
+                )}
               </div>
             ) : null}
-            {detailTab === "offer" ? (
-              <div className="text-sm space-y-2">
-                {selected.offerDetails ? (
-                  <>
-                    <p>Salary: {selected.offerDetails.salary}</p>
-                    <p>Joining: {selected.offerDetails.joiningDate}</p>
-                    <p>Status: {selected.offerDetails.status}</p>
-                  </>
-                ) : <p className="text-muted-foreground">No offer details.</p>}
-                {selected.status === "hired" && can("recruitment:create") ? (
-                  <Button onClick={async () => {
-                    await recruitmentApi.convertToEmployee(selected._id);
-                    toast.success("Converted to employee");
-                    qc.invalidateQueries({ queryKey: ["candidates"] });
-                  }}>Convert to Employee</Button>
+
+            {detailTab === "decision" ? (
+              <div className="space-y-4">
+                {selected.interviewSchedule?.feedback ? (
+                  <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+                    <p className="font-medium">Interview summary</p>
+                    <p>Rating: {selected.interviewSchedule.rating ?? "—"}/5</p>
+                    <p className="mt-1">{selected.interviewSchedule.feedback}</p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Add interview feedback before making a hiring decision.
+                  </p>
+                )}
+
+                {selected.status === "hired" ? (
+                  <p className="text-sm font-medium text-emerald-700">
+                    This candidate has been hired and converted to an employee.
+                  </p>
+                ) : null}
+
+                {selected.status === "rejected" ? (
+                  <p className="text-sm font-medium text-red-700">
+                    This candidate was rejected.
+                    {selected.notes ? ` Reason: ${selected.notes}` : null}
+                  </p>
+                ) : null}
+
+                {canManage &&
+                selected.status !== "hired" &&
+                selected.status !== "rejected" &&
+                selected.interviewSchedule?.feedback ? (
+                  <div className="flex flex-wrap gap-3">
+                    <Button
+                      loading={hireMut.isPending}
+                      onClick={() => hireMut.mutate(selected._id)}
+                    >
+                      <UserCheck className="mr-2 h-4 w-4" />
+                      Hire candidate
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="text-red-700 hover:text-red-800"
+                      onClick={() => setRejectOpen(true)}
+                    >
+                      <UserX className="mr-2 h-4 w-4" />
+                      Reject candidate
+                    </Button>
+                  </div>
                 ) : null}
               </div>
             ) : null}
           </>
         ) : null}
+      </Modal>
+
+      <Modal
+        open={rejectOpen}
+        onOpenChange={setRejectOpen}
+        title="Reject candidate"
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRejectOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              loading={rejectMut.isPending}
+              className="bg-destructive hover:opacity-90"
+              onClick={() => {
+                if (!selected) return;
+                rejectMut.mutate({ id: selected._id, reason: rejectReason });
+              }}
+            >
+              Reject
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-muted-foreground">
+          This candidate will be marked as rejected and removed from the active hiring pipeline.
+        </p>
+        <div className="mt-3">
+          <Label>Reason (optional)</Label>
+          <textarea
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            rows={3}
+            className="mt-1 w-full rounded-lg border border-border px-3 py-2 text-sm"
+            placeholder="e.g. Does not meet experience requirements"
+          />
+        </div>
       </Modal>
     </div>
   );

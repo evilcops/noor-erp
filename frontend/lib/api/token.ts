@@ -1,5 +1,7 @@
 const ACCESS_KEY = "noor_access_token";
 const REFRESH_KEY = "noor_refresh_token";
+const ACCESS_COOKIE = "noor_api_access";
+const ACCESS_MAX_AGE = 15 * 60; // 15 minutes, matches default JWT access TTL
 
 export function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -11,14 +13,21 @@ export function getRefreshToken(): string | null {
   return localStorage.getItem(REFRESH_KEY);
 }
 
+function setAccessCookie(accessToken: string) {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  document.cookie = `${ACCESS_COOKIE}=${encodeURIComponent(accessToken)}; path=/; max-age=${ACCESS_MAX_AGE}; SameSite=Lax${secure}`;
+  document.cookie = `noor_access_token=${encodeURIComponent(accessToken)}; path=/; max-age=${ACCESS_MAX_AGE}; SameSite=Lax${secure}`;
+}
+
 export function setTokens(accessToken: string, refreshToken: string) {
   localStorage.setItem(ACCESS_KEY, accessToken);
   localStorage.setItem(REFRESH_KEY, refreshToken);
-  document.cookie = `noor_api_access=${accessToken}; path=/; max-age=900; SameSite=Lax`;
+  setAccessCookie(accessToken);
 }
 
 export function clearTokens() {
   localStorage.removeItem(ACCESS_KEY);
   localStorage.removeItem(REFRESH_KEY);
-  document.cookie = "noor_api_access=; path=/; max-age=0";
+  document.cookie = `${ACCESS_COOKIE}=; path=/; max-age=0`;
+  document.cookie = "noor_access_token=; path=/; max-age=0";
 }

@@ -37,9 +37,12 @@ yarn-error.log*
 !.env.example
 !**/.env.example
 
-# backend build
+# backend build (legacy)
 backend/dist/
 backend/.data/
+
+# local MongoDB dev data
+frontend/.data/
 
 # vercel
 .vercel
