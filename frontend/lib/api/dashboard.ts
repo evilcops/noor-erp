@@ -3,6 +3,7 @@ import { attendanceApi } from "@/lib/api/attendance";
 import { employeeApi } from "@/lib/api/employees";
 import { leaveApi } from "@/lib/api/leave";
 import { recruitmentApi } from "@/lib/api/recruitment";
+import type { ExpiringDocumentAlert } from "@/types/employee";
 
 export interface HrSummary {
   totalEmployees: number;
@@ -19,6 +20,7 @@ export interface DashboardData {
   pendingInterviews: number;
   upcomingHolidays: Array<{ name: string; date: string }>;
   expiringDocuments: number;
+  expiringDocumentAlerts: ExpiringDocumentAlert[];
   reviewsDue: number;
 }
 
@@ -29,7 +31,8 @@ export const dashboardApi = {
       attendanceApi.getToday().catch(() => [] as Awaited<ReturnType<typeof attendanceApi.getToday>>),
       leaveApi.list({ status: "pending", limit: 100 }).catch(() => ({ data: [] })),
       recruitmentApi.getCandidates({ limit: 100 }).catch(() => ({ data: [] })),
-      employeeApi.getExpiringDocuments(30).catch(() => []),
+      // 274 days = 9 months (widest alert window, for passport/driving_license/mulkiya)
+      employeeApi.getExpiringDocuments(274).catch(() => []),
     ]);
 
     const presentToday = todayAttendance.filter((a) => a.timeIn).length;
@@ -44,6 +47,8 @@ export const dashboardApi = {
     const pendingInterviews = candidates.data.filter(
       (c) => c.status === "interview_scheduled"
     ).length;
+
+    const alerts = Array.isArray(expiring) ? (expiring as ExpiringDocumentAlert[]) : [];
 
     return {
       summary: {
@@ -63,7 +68,8 @@ export const dashboardApi = {
       })),
       pendingInterviews,
       upcomingHolidays: [],
-      expiringDocuments: Array.isArray(expiring) ? expiring.length : 0,
+      expiringDocuments: alerts.length,
+      expiringDocumentAlerts: alerts,
       reviewsDue: 0,
     };
   },

@@ -37,4 +37,10 @@ export const recruitmentApi = {
       `/recruitment/candidates/${id}/convert-to-employee`,
       { method: "POST" }
     ),
+
+  uploadCV: (id: string, formData: FormData) =>
+    apiRequest<Candidate>(`/recruitment/candidates/${id}/cv`, {
+      method: "POST",
+      body: formData,
+    }),
 };

@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import type { Request, Response } from "express";
 import { Recruitment } from "../models/Recruitment.model";
 import { Employee } from "../models/Employee.model";
@@ -10,6 +12,8 @@ import {
   sendSuccess,
 } from "../utils/apiResponse";
 import { AppError } from "../utils/AppError";
+
+const UPLOAD_DIR = path.join(process.cwd(), ".data", "uploads");
 
 export async function addCandidate(req: Request, res: Response) {
   const candidate = await Recruitment.create({
@@ -101,6 +105,24 @@ export async function interviewFeedback(req: Request, res: Response) {
   candidate.status = "interviewed";
   candidate.updatedBy = req.user!._id;
   await candidate.save();
+  return sendSuccess(res, candidate);
+}
+
+export async function uploadCandidateCV(req: Request, res: Response) {
+  const candidate = await Recruitment.findById(req.params.id);
+  if (!candidate) throw new AppError("NOT_FOUND", "Candidate not found", 404);
+
+  if (!req.file) throw new AppError("VALIDATION_ERROR", "CV file required", 400);
+
+  await fs.promises.mkdir(UPLOAD_DIR, { recursive: true });
+  const ext = path.extname(req.file.originalname) || ".pdf";
+  const filename = `cv-${Date.now()}-${candidate._id}${ext}`;
+  await fs.promises.writeFile(path.join(UPLOAD_DIR, filename), req.file.buffer);
+
+  candidate.resumeUrl = `/api/uploads/${filename}`;
+  candidate.updatedBy = req.user!._id;
+  await candidate.save();
+
   return sendSuccess(res, candidate);
 }
 

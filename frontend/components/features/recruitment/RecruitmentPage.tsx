@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, LayoutGrid, List, Plus, UserCheck, UserX } from "lucide-react";
+import { CalendarClock, Download, Eye, FileText, LayoutGrid, List, Plus, UserCheck, UserX } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SearchBar } from "@/components/common/SearchBar";
@@ -19,7 +19,9 @@ import { useAuth, useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { companyApi } from "@/lib/api/companies";
 import { recruitmentApi } from "@/lib/api/recruitment";
+import { getAccessToken } from "@/lib/api/token";
 import { cn } from "@/lib/utils";
+import { FileUpload } from "@/components/common/FileUpload";
 import type { Candidate, CandidateStatus } from "@/types/recruitment";
 
 const PIPELINE: CandidateStatus[] = [
@@ -92,6 +94,9 @@ export function RecruitmentPage() {
   const [form, setForm] = useState(emptyCandidateForm);
   const [addCompanyId, setAddCompanyId] = useState("");
   const [addBranchId, setAddBranchId] = useState("");
+  const [cvFile, setCvFile] = useState<File | null>(null);
+  const [cvError, setCvError] = useState<string | undefined>(undefined);
+  const [cvViewerOpen, setCvViewerOpen] = useState(false);
 
   const [interviewForm, setInterviewForm] = useState(emptyInterviewForm);
   const [feedbackForm, setFeedbackForm] = useState(emptyFeedbackForm);
@@ -151,9 +156,8 @@ export function RecruitmentPage() {
   };
 
   const createMut = useMutation({
-    mutationFn: () => {
-      const companyId =
-        addCompanyId || user?.companyId || activeBranch?.companyId;
+    mutationFn: async () => {
+      const companyId = addCompanyId || user?.companyId || activeBranch?.companyId;
       const branchId = addBranchId || activeBranchId;
       if (!companyId || !branchId) {
         throw new Error("Select a company and branch before adding a candidate");
@@ -161,19 +165,30 @@ export function RecruitmentPage() {
       if (!form.position || !form.candidateName || !form.candidateEmail) {
         throw new Error("Position, name, and email are required");
       }
-      return recruitmentApi.create({
-        ...form,
-        companyId,
-        branchId,
-      });
+      if (!cvFile) {
+        setCvError("CV / Resume is required");
+        throw new Error("CV / Resume is required");
+      }
+
+      // Step 1: create candidate record
+      const candidate = await recruitmentApi.create({ ...form, companyId, branchId });
+
+      // Step 2: upload CV file
+      const fd = new FormData();
+      fd.append("file", cvFile);
+      await recruitmentApi.uploadCV(candidate._id, fd);
+
+      return candidate;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["candidates"] });
-      toast.success("Candidate added");
+      toast.success("Candidate added with CV");
       setAddOpen(false);
       setForm(emptyCandidateForm);
       setAddCompanyId("");
       setAddBranchId("");
+      setCvFile(null);
+      setCvError(undefined);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -304,6 +319,25 @@ export function RecruitmentPage() {
     setDetailOpen(true);
   };
 
+  async function downloadCV(url: string) {
+    try {
+      const token = getAccessToken();
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("Download failed");
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = url.split("/").pop() ?? "cv";
+      a.click();
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      toast.error("Could not download CV");
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -385,6 +419,7 @@ export function RecruitmentPage() {
           candidates={candidates}
           loading={isLoading || authLoading}
           onSelect={openCandidate}
+          statusFilter={statusFilter || undefined}
         />
       ) : (
         <DataTable
@@ -397,7 +432,10 @@ export function RecruitmentPage() {
 
       <Modal
         open={addOpen}
-        onOpenChange={setAddOpen}
+        onOpenChange={(o) => {
+          setAddOpen(o);
+          if (!o) { setCvFile(null); setCvError(undefined); }
+        }}
         title="Add Candidate"
         footer={
           <>
@@ -485,6 +523,37 @@ export function RecruitmentPage() {
               className="w-full rounded-lg border border-border px-3 py-2 text-sm"
             />
           </div>
+
+          {/* CV Upload — required */}
+          <div className="sm:col-span-2">
+            <Label>
+              CV / Resume <span className="text-destructive">*</span>
+            </Label>
+            {cvFile ? (
+              <div className="mb-2 flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+                <div className="flex items-center gap-2 text-sm">
+                  <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="truncate font-medium">{cvFile.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    ({(cvFile.size / 1024).toFixed(0)} KB)
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setCvFile(null); setCvError(undefined); }}
+                  className="ml-2 text-xs text-destructive hover:underline"
+                >
+                  Remove
+                </button>
+              </div>
+            ) : null}
+            <FileUpload
+              accept=".pdf,.doc,.docx"
+              label={cvFile ? "Replace CV" : "Upload CV / Resume (PDF or Word)"}
+              onFileSelect={(f) => { setCvFile(f); setCvError(undefined); }}
+              error={cvError}
+            />
+          </div>
         </div>
       </Modal>
 
@@ -514,23 +583,59 @@ export function RecruitmentPage() {
             />
 
             {detailTab === "overview" ? (
-              <div className="space-y-3 text-sm">
-                <p>
-                  <span className="text-muted-foreground">Email:</span> {selected.candidateEmail}
-                </p>
-                <p>
-                  <span className="text-muted-foreground">Phone:</span>{" "}
-                  {selected.candidatePhone ?? "—"}
-                </p>
-                <p>
-                  <span className="text-muted-foreground">Department:</span>{" "}
-                  {selected.department ?? "—"}
-                </p>
+              <div className="space-y-4 text-sm">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <p>
+                    <span className="text-muted-foreground">Email:</span>{" "}
+                    {selected.candidateEmail}
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">Phone:</span>{" "}
+                    {selected.candidatePhone ?? "—"}
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">Department:</span>{" "}
+                    {selected.department ?? "—"}
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">Applied:</span>{" "}
+                    {new Date(selected.createdAt).toLocaleDateString()}
+                  </p>
+                </div>
+
                 {selected.notes ? (
                   <p>
                     <span className="text-muted-foreground">Notes:</span> {selected.notes}
                   </p>
                 ) : null}
+
+                {/* CV section */}
+                <div className="rounded-lg border border-border p-3">
+                  <p className="mb-2 font-medium">CV / Resume</p>
+                  {selected.resumeUrl ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCvViewerOpen(true)}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium hover:bg-muted"
+                      >
+                        <Eye className="h-4 w-4" />
+                        View CV
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => downloadCV(selected.resumeUrl!)}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium hover:bg-muted"
+                      >
+                        <Download className="h-4 w-4" />
+                        Download
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground text-xs italic">No CV uploaded yet.</p>
+                  )}
+                </div>
+
                 {canManage && selected.status === "new" ? (
                   <Button
                     variant="secondary"
@@ -747,6 +852,16 @@ export function RecruitmentPage() {
         ) : null}
       </Modal>
 
+      {/* CV inline viewer */}
+      {cvViewerOpen && selected?.resumeUrl ? (
+        <CvViewerModal
+          url={selected.resumeUrl}
+          name={selected.candidateName}
+          onClose={() => setCvViewerOpen(false)}
+          onDownload={() => downloadCV(selected.resumeUrl!)}
+        />
+      ) : null}
+
       <Modal
         open={rejectOpen}
         onOpenChange={setRejectOpen}
@@ -784,6 +899,97 @@ export function RecruitmentPage() {
           />
         </div>
       </Modal>
+    </div>
+  );
+}
+
+// ─── CV Viewer ───────────────────────────────────────────────────────────────
+
+function CvViewerModal({
+  url,
+  name,
+  onClose,
+  onDownload,
+}: {
+  url: string;
+  name: string;
+  onClose: () => void;
+  onDownload: () => void;
+}) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const isPdf = url.toLowerCase().endsWith(".pdf");
+
+  useEffect(() => {
+    let objectUrl: string | undefined;
+    async function load() {
+      try {
+        const token = getAccessToken();
+        const res = await fetch(url, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load CV");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [url]);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+      <div className="flex h-[90vh] w-full max-w-4xl flex-col rounded-2xl border border-border bg-background shadow-2xl">
+        {/* header */}
+        <div className="flex items-center justify-between border-b border-border px-5 py-3">
+          <div className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-muted-foreground" />
+            <span className="font-semibold">{name} — CV</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={onDownload}>
+              <Download className="mr-1.5 h-4 w-4" />
+              Download
+            </Button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* body */}
+        <div className="flex flex-1 items-center justify-center overflow-hidden">
+          {loading ? (
+            <p className="text-sm text-muted-foreground">Loading CV…</p>
+          ) : error ? (
+            <p className="text-sm text-destructive">{error}</p>
+          ) : blobUrl && isPdf ? (
+            <iframe src={blobUrl} className="h-full w-full" title="CV preview" />
+          ) : blobUrl ? (
+            <div className="flex flex-col items-center gap-4 p-8 text-center">
+              <FileText className="h-14 w-14 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">
+                This file type cannot be previewed inline.
+              </p>
+              <Button onClick={onDownload}>
+                <Download className="mr-1.5 h-4 w-4" />
+                Download to view
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }

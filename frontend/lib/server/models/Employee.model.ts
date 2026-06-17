@@ -1,11 +1,26 @@
 import mongoose, { Schema, type Document, type Model } from "mongoose";
 import { softDeletePlugin } from "./plugins/softDelete";
 
+export type ComplianceDocType =
+  | "passport"
+  | "driving_license"
+  | "pataka"
+  | "mulkiya"
+  | "car_insurance";
+
+export type LegacyDocType =
+  | "visa"
+  | "labour_card"
+  | "id_card"
+  | "contract"
+  | "certificate";
+
 export interface IEmployeeDocument {
   _id?: mongoose.Types.ObjectId;
-  type: "passport" | "visa" | "labour_card" | "id_card" | "contract" | "certificate";
+  type: ComplianceDocType | LegacyDocType;
   number?: string;
   fileUrl?: string;
+  issuanceDate?: Date;
   expiryDate?: Date;
   status: "valid" | "expired" | "expiring_soon";
   uploadedAt: Date;
@@ -34,6 +49,7 @@ export interface IEmployee extends Document {
   contractStartDate?: Date;
   contractEndDate?: Date;
   status: "active" | "on_leave" | "suspended" | "resigned" | "terminated" | "archived";
+  hasVehicle?: boolean;
   documents: IEmployeeDocument[];
   notes?: string;
   createdBy?: mongoose.Types.ObjectId;
@@ -74,14 +90,27 @@ const employeeSchema = new Schema<IEmployee>(
       enum: ["active", "on_leave", "suspended", "resigned", "terminated", "archived"],
       default: "active",
     },
+    hasVehicle: { type: Boolean, default: false },
     documents: [
       {
         type: {
           type: String,
-          enum: ["passport", "visa", "labour_card", "id_card", "contract", "certificate"],
+          enum: [
+            "passport",
+            "driving_license",
+            "pataka",
+            "mulkiya",
+            "car_insurance",
+            "visa",
+            "labour_card",
+            "id_card",
+            "contract",
+            "certificate",
+          ],
         },
         number: String,
         fileUrl: String,
+        issuanceDate: Date,
         expiryDate: Date,
         status: {
           type: String,

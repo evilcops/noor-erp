@@ -156,17 +156,23 @@ interface RecruitmentPipelineProps {
   candidates: Candidate[];
   loading?: boolean;
   onSelect: (candidate: Candidate) => void;
+  statusFilter?: string;
 }
 
 export function RecruitmentPipeline({
   candidates,
   loading,
   onSelect,
+  statusFilter,
 }: RecruitmentPipelineProps) {
-  const grouped = STAGES.map((stage) => ({
+  const allGrouped = STAGES.map((stage) => ({
     ...stage,
     items: candidates.filter((c) => c.status === stage.status),
   }));
+
+  const grouped = statusFilter
+    ? allGrouped.filter((col) => col.status === statusFilter)
+    : allGrouped;
 
   const totalActive = candidates.filter(
     (c) => !["hired", "rejected", "archived"].includes(c.status)

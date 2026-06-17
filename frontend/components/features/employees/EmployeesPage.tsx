@@ -18,7 +18,7 @@ import { EmployeeDetailsModal } from "@/components/features/employees/EmployeeDe
 import { useAuth, useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useEmployees, useEmployeeMutations } from "@/hooks/useEmployees";
-import type { Employee } from "@/types/employee";
+import type { ComplianceFiles, Employee } from "@/types/employee";
 import type { EmployeeFormValues } from "@/lib/validations/employee";
 
 const STATUS_FILTER = [
@@ -114,7 +114,19 @@ export function EmployeesPage() {
     },
   ];
 
-  async function handleSubmit(form: EmployeeFormValues) {
+  async function uploadComplianceFiles(employeeId: string, files: ComplianceFiles) {
+    const entries = Object.entries(files) as [keyof ComplianceFiles, File][];
+    await Promise.all(
+      entries.map(([type, file]) => {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("type", type);
+        return uploadDoc.mutateAsync({ id: employeeId, formData: fd });
+      })
+    );
+  }
+
+  async function handleSubmit(form: EmployeeFormValues, files: ComplianceFiles) {
     const branch = branches.find((b) => b._id === form.branchId);
     const companyId = user?.companyId ?? branch?.companyId;
     if (!companyId) {
@@ -128,18 +140,25 @@ export function EmployeesPage() {
     const payload = formToPayload(form, companyId);
     if (selected && formOpen) {
       await update.mutateAsync({ id: selected._id, data: payload });
+      if (Object.keys(files).length) {
+        await uploadComplianceFiles(selected._id, files);
+      }
     } else {
-      await create.mutateAsync(payload);
+      const created = await create.mutateAsync(payload);
+      if (Object.keys(files).length && created?._id) {
+        await uploadComplianceFiles(created._id, files);
+      }
     }
     setFormOpen(false);
     setSelected(null);
   }
 
-  async function handleUpload(file: File, type: string, expiryDate: string) {
+  async function handleUpload(file: File, type: string, issuanceDate: string, expiryDate: string) {
     if (!selected) return;
     const fd = new FormData();
     fd.append("file", file);
     fd.append("type", type);
+    if (issuanceDate) fd.append("issuanceDate", issuanceDate);
     if (expiryDate) fd.append("expiryDate", expiryDate);
     await uploadDoc.mutateAsync({ id: selected._id, formData: fd });
     refetch();

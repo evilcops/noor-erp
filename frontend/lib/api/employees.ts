@@ -1,6 +1,11 @@
 import { apiRequest, apiRequestWithMeta, buildQuery } from "@/lib/api/client";
 import type { PaginatedParams } from "@/types/api";
-import type { CreateEmployeeInput, Employee, UpdateEmployeeInput } from "@/types/employee";
+import type {
+  CreateEmployeeInput,
+  Employee,
+  ExpiringDocumentAlert,
+  UpdateEmployeeInput,
+} from "@/types/employee";
 
 export const employeeApi = {
   getAll: (params: PaginatedParams = {}) =>
@@ -23,6 +28,6 @@ export const employeeApi = {
   deleteDocument: (id: string, docId: string) =>
     apiRequest<{ message: string }>(`/employees/${id}/documents/${docId}`, { method: "DELETE" }),
 
-  getExpiringDocuments: (days = 30) =>
-    apiRequest<unknown[]>(`/employees/documents/expiring${buildQuery({ days })}`),
+  getExpiringDocuments: (days = 274) =>
+    apiRequest<ExpiringDocumentAlert[]>(`/employees/documents/expiring${buildQuery({ days })}`),
 };

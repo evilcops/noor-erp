@@ -1,5 +1,19 @@
 import { z } from "zod";
 
+const complianceDocSchema = z.object({
+  issuanceDate: z.string().optional(),
+  expiryDate: z.string().optional(),
+});
+
+const complianceDocsSchema = z.object({
+  passport: complianceDocSchema.optional(),
+  driving_license: complianceDocSchema.optional(),
+  pataka: complianceDocSchema.optional(),
+  /** Only required/relevant when hasVehicle is true — enforced at controller level */
+  mulkiya: complianceDocSchema.optional().nullable(),
+  car_insurance: complianceDocSchema.optional().nullable(),
+});
+
 export const createEmployeeSchema = z.object({
   companyId: z.string().min(1),
   branchId: z.string().min(1),
@@ -22,6 +36,8 @@ export const createEmployeeSchema = z.object({
   contractStartDate: z.string().optional(),
   contractEndDate: z.string().optional(),
   notes: z.string().optional(),
+  hasVehicle: z.boolean().optional(),
+  complianceDocs: complianceDocsSchema.optional(),
 });
 
 export const updateEmployeeSchema = createEmployeeSchema
