@@ -36,6 +36,8 @@ export interface IAttendance extends Document {
     rejectionReason?: string;
   };
   approvedBy?: mongoose.Types.ObjectId;
+  source?: "web" | "hardware" | "manual_override";
+  deviceId?: string;
   notes?: string;
   createdBy?: mongoose.Types.ObjectId;
   updatedBy?: mongoose.Types.ObjectId;
@@ -85,6 +87,8 @@ const attendanceSchema = new Schema<IAttendance>(
       rejectionReason: String,
     },
     approvedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    source: { type: String, enum: ["web", "hardware", "manual_override"], default: "web" },
+    deviceId: String,
     notes: String,
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
     updatedBy: { type: Schema.Types.ObjectId, ref: "User" },

@@ -28,6 +28,12 @@ export const employeeApi = {
   deleteDocument: (id: string, docId: string) =>
     apiRequest<{ message: string }>(`/employees/${id}/documents/${docId}`, { method: "DELETE" }),
 
+  uploadFamilyBataka: (id: string, memberId: string, formData: FormData) => {
+    // memberId goes in the body (flat route — avoids nested dynamic segments)
+    formData.set("memberId", memberId);
+    return apiRequest<Employee>(`/employees/${id}/family-bataka`, { method: "POST", body: formData });
+  },
+
   getExpiringDocuments: (days = 274) =>
     apiRequest<ExpiringDocumentAlert[]>(`/employees/documents/expiring${buildQuery({ days })}`),
 };

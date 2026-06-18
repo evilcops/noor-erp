@@ -11,7 +11,8 @@ export type EmployeeStatus =
 export type ComplianceDocType =
   | "passport"
   | "driving_license"
-  | "pataka"
+  | "bataka"
+  | "pataka" // legacy alias — will be migrated to bataka on startup
   | "mulkiya"
   | "car_insurance";
 
@@ -58,7 +59,10 @@ export interface Employee {
   contractStartDate?: string;
   contractEndDate?: string;
   status: EmployeeStatus;
+  profilePicture?: string;
   hasVehicle?: boolean;
+  familyType?: "individual" | "family";
+  familyMembers?: FamilyMember[];
   documents: EmployeeDocument[];
   notes?: string;
   createdBy?: string;
@@ -75,7 +79,7 @@ export interface ComplianceDocInput {
 export interface ComplianceDocs {
   passport?: ComplianceDocInput;
   driving_license?: ComplianceDocInput;
-  pataka?: ComplianceDocInput;
+  bataka?: ComplianceDocInput;
   mulkiya?: ComplianceDocInput;
   car_insurance?: ComplianceDocInput;
 }
@@ -84,7 +88,7 @@ export interface ComplianceDocs {
 export interface ComplianceFiles {
   passport?: File;
   driving_license?: File;
-  pataka?: File;
+  bataka?: File;
   mulkiya?: File;
   car_insurance?: File;
 }
@@ -116,6 +120,23 @@ export interface CreateEmployeeInput {
 
 export type UpdateEmployeeInput = Partial<Omit<CreateEmployeeInput, "companyId" | "branchId">>;
 
+export type FamilyRelationship = "spouse" | "son" | "daughter" | "parents";
+
+export interface FamilyMemberDocument {
+  issueDate?: string;
+  expiryDate?: string;
+  fileUrl?: string;
+  status: "valid" | "expired" | "expiring_soon";
+}
+
+export interface FamilyMember {
+  _id?: string;
+  name: string;
+  profilePicture?: string;
+  relationship: FamilyRelationship;
+  bataka?: FamilyMemberDocument;
+}
+
 /** Expiring document entry returned by the backend alert endpoint */
 export interface ExpiringDocumentAlert {
   employeeId: string;
@@ -124,4 +145,6 @@ export interface ExpiringDocumentAlert {
   document: EmployeeDocument;
   daysRemaining: number;
   alertLevel: "critical" | "warning" | "notice";
+  isFamilyAlert?: boolean;
+  familyMemberName?: string;
 }

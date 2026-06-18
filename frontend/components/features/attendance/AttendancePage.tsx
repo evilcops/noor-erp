@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Clock, Download, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
+import { Clock, Download, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { DataTable, type Column } from "@/components/common/DataTable";
@@ -334,23 +334,10 @@ export function AttendancePage() {
               </Button>
             ) : null}
             {can("attendance:create") ? (
-              <>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setCheckEmployeeId(employeeFilter || employeeOptions[0]?.value || "");
-                    setCheckModal("in");
-                    captureLocation();
-                  }}
-                >
-                  <Clock className="mr-2 h-4 w-4" />
-                  Quick Check In
-                </Button>
-                <Button onClick={openCreate}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Record
-                </Button>
-              </>
+              <Button onClick={openCreate}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Record
+              </Button>
             ) : null}
           </div>
         }
@@ -429,38 +416,6 @@ export function AttendancePage() {
           <div>
             <Label>Notes</Label>
             <Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
-        open={!!checkModal}
-        onOpenChange={() => setCheckModal(null)}
-        title={checkModal === "in" ? "Quick Check In" : "Quick Check Out"}
-        footer={
-          <Button
-            loading={checkMut.isPending}
-            onClick={() => checkMut.mutate(checkModal!)}
-            disabled={!checkEmployeeId}
-          >
-            Confirm
-          </Button>
-        }
-      >
-        <div className="space-y-4">
-          <div>
-            <Label>Employee *</Label>
-            <Select
-              value={checkEmployeeId}
-              onChange={(e) => setCheckEmployeeId(e.target.value)}
-              options={[{ value: "", label: "Select employee..." }, ...employeeOptions]}
-            />
-          </div>
-          <div className="flex items-center gap-2 text-sm">
-            <MapPin className="h-4 w-4 text-brand" />
-            {location
-              ? `${location.lat.toFixed(4)}, ${location.lng.toFixed(4)} — ${location.address}`
-              : "Capturing GPS..."}
           </div>
         </div>
       </Modal>

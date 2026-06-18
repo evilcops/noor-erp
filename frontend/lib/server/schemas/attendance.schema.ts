@@ -62,3 +62,12 @@ export const missedCheckoutSchema = z.object({
   timeOut: z.string().optional(),
   reason: z.string().optional(),
 });
+
+export const deviceLogSchema = z.object({
+  deviceId: z.string().min(1),
+  employeeCode: z.string().min(1),
+  timestamp: z.string().min(1),
+  logType: z.enum(["in", "out"]).optional(),
+  verificationType: z.enum(["fingerprint", "face", "card"]).optional(),
+  payload: z.string().optional(),
+});

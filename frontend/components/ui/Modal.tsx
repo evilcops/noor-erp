@@ -12,6 +12,8 @@ interface ModalProps {
   children: React.ReactNode;
   size?: "sm" | "md" | "lg" | "xl" | "full";
   footer?: React.ReactNode;
+  /** Override z-index for both overlay and content (default: 50) */
+  zIndex?: number;
 }
 
 const sizes = {
@@ -30,14 +32,19 @@ export function Modal({
   children,
   size = "lg",
   footer,
+  zIndex,
 }: ModalProps) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out" />
+        <Dialog.Overlay
+          className="fixed inset-0 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out"
+          style={zIndex !== undefined ? { zIndex } : { zIndex: 50 }}
+        />
         <Dialog.Content
+          style={zIndex !== undefined ? { zIndex } : { zIndex: 50 }}
           className={cn(
-            "fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-border bg-card shadow-xl",
+            "fixed left-1/2 top-1/2 flex max-h-[90vh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-border bg-card shadow-xl",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "sm:w-full",
             sizes[size]

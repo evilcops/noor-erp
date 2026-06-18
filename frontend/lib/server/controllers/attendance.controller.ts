@@ -420,3 +420,80 @@ export async function attendanceReport(req: Request, res: Response) {
   const data = await generateAttendanceReport(req.user!, req.query as Record<string, string>);
   return sendSuccess(res, data);
 }
+
+/**
+ * Hardware SDK webhook — receives raw device logs from biometric/access-control hardware.
+ * Authenticated via X-Device-Key header instead of JWT.
+ * Automatically determines check-in vs check-out based on existing records for the day.
+ */
+export async function deviceLog(req: Request, res: Response) {
+  const deviceKey = req.headers["x-device-key"];
+  const expected = process.env.DEVICE_SECRET_KEY;
+  if (!expected || deviceKey !== expected) {
+    throw new AppError("UNAUTHORIZED", "Invalid device key", 401);
+  }
+
+  const { deviceId, employeeCode, timestamp, logType, verificationType, payload } = req.body as {
+    deviceId: string;
+    employeeCode: string;
+    timestamp: string;
+    logType?: "in" | "out";
+    verificationType?: string;
+    payload?: string;
+  };
+
+  const employee = await Employee.findOne({ employeeId: employeeCode, deletedAt: null });
+  if (!employee) {
+    throw new AppError("NOT_FOUND", `No employee found for code: ${employeeCode}`, 404);
+  }
+
+  const eventTime = new Date(timestamp);
+  const date = startOfDay(eventTime.toISOString().slice(0, 10));
+
+  let record = await Attendance.findOne({ employeeId: employee._id, date, deletedAt: null });
+
+  // Determine whether this is a check-in or check-out
+  const isCheckIn = logType === "in" || (!record?.timeIn);
+  const isCheckOut = logType === "out" || (record?.timeIn && !record?.timeOut);
+
+  const deviceInfoStr = `Hardware:${deviceId}${verificationType ? `:${verificationType}` : ""}`;
+
+  if (isCheckIn && !record?.timeIn) {
+    const metrics = computeAttendanceMetrics(date, eventTime);
+    if (!record) {
+      record = await Attendance.create({
+        employeeId: employee._id,
+        companyId: employee.companyId,
+        branchId: employee.branchId,
+        date,
+        timeIn: eventTime,
+        deviceInfo: deviceInfoStr,
+        deviceId,
+        source: "hardware",
+        isLate: metrics.isLate,
+        lateMinutes: metrics.lateMinutes,
+        status: metrics.status,
+      });
+    } else {
+      record.timeIn = eventTime;
+      record.deviceInfo = deviceInfoStr;
+      record.deviceId = deviceId;
+      record.source = "hardware";
+      record.isLate = metrics.isLate;
+      record.lateMinutes = metrics.lateMinutes;
+      record.status = metrics.status;
+      await record.save();
+    }
+  } else if (isCheckOut && record?.timeIn && !record?.timeOut) {
+    const metrics = computeAttendanceMetrics(date, record.timeIn, eventTime);
+    record.timeOut = eventTime;
+    record.totalHours = metrics.totalHours;
+    record.isEarlyLeave = metrics.isEarlyLeave;
+    record.earlyLeaveMinutes = metrics.earlyLeaveMinutes;
+    record.status = metrics.status;
+    record.deviceInfo = deviceInfoStr;
+    await record.save();
+  }
+
+  return sendSuccess(res, { received: true, employeeCode, timestamp });
+}

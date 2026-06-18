@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Calendar, Clock, FileWarning, Plus, TrendingUp, UserPlus, Users,
+  AlertTriangle, Building2, Calendar, Clock, FileWarning, Plus, TrendingUp, UserPlus, Users,
 } from "lucide-react";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatusBadge } from "@/components/common/StatusBadge";
@@ -92,23 +92,83 @@ export function DashboardPage() {
         <section className="rounded-xl border border-border bg-card p-6">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
             <FileWarning className="h-5 w-5 text-warning" />
-            Upcoming & Due
+            Document Expiry Alerts
           </h2>
-          <ul className="space-y-3 text-sm">
-            <li className="flex justify-between rounded-lg border border-border px-3 py-2">
-              <span>Document expirations (30 days)</span>
-              <span className="font-medium text-warning">{data?.expiringDocuments ?? 0}</span>
-            </li>
-            <li className="flex justify-between rounded-lg border border-border px-3 py-2">
-              <span>Performance reviews due</span>
-              <span className="font-medium">{data?.reviewsDue ?? 0}</span>
-            </li>
-          </ul>
+
+          {/* Employee document alerts */}
+          {(data?.expiringDocumentAlerts ?? []).length > 0 ? (
+            <div className="mb-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Employee Documents</p>
+              <ul className="space-y-1.5 max-h-36 overflow-y-auto">
+                {data!.expiringDocumentAlerts.slice(0, 8).map((a, i) => (
+                  <li key={i} className={`flex items-start justify-between gap-2 rounded-lg border px-3 py-1.5 text-xs ${a.alertLevel === "critical" ? "border-destructive/30 bg-destructive/5" : a.alertLevel === "warning" ? "border-amber-300/50 bg-amber-50/50 dark:bg-amber-950/20" : "border-border"}`}>
+                    <span className="truncate">
+                      <AlertTriangle className={`mr-1 inline h-3 w-3 ${a.alertLevel === "critical" ? "text-destructive" : "text-amber-500"}`} />
+                      {a.employeeName} — {String(a.document.type).replace(/_/g, " ")}
+                    </span>
+                    <span className={`shrink-0 font-semibold ${a.alertLevel === "critical" ? "text-destructive" : "text-amber-600"}`}>
+                      {a.daysRemaining}d
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {/* Business document alerts */}
+          {(data?.expiringBusinessDocAlerts ?? []).length > 0 ? (
+            <div className="mb-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Business Documents</p>
+              <ul className="space-y-1.5">
+                {data!.expiringBusinessDocAlerts.map((a, i) => (
+                  <li key={i} className={`flex items-start justify-between gap-2 rounded-lg border px-3 py-1.5 text-xs ${a.alertLevel === "critical" ? "border-destructive/30 bg-destructive/5" : "border-amber-300/50 bg-amber-50/50 dark:bg-amber-950/20"}`}>
+                    <span className="truncate">
+                      <Building2 className="mr-1 inline h-3 w-3 text-muted-foreground" />
+                      {a.customTypeName ?? String(a.type).replace(/_/g, " ")}
+                    </span>
+                    <span className={`shrink-0 font-semibold ${a.alertLevel === "critical" ? "text-destructive" : "text-amber-600"}`}>{a.daysRemaining}d</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {/* Branch document alerts */}
+          {(data?.expiringBranchDocAlerts ?? []).length > 0 ? (
+            <div className="mb-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Branch Documents</p>
+              <ul className="space-y-1.5">
+                {data!.expiringBranchDocAlerts.map((a, i) => (
+                  <li key={i} className={`flex items-start justify-between gap-2 rounded-lg border px-3 py-1.5 text-xs ${a.alertLevel === "critical" ? "border-destructive/30 bg-destructive/5" : "border-amber-300/50 bg-amber-50/50 dark:bg-amber-950/20"}`}>
+                    <span className="truncate">
+                      <Building2 className="mr-1 inline h-3 w-3 text-muted-foreground" />
+                      {a.branchName} — {a.customTypeName ?? String(a.type).replace(/_/g, " ")}
+                    </span>
+                    <span className={`shrink-0 font-semibold ${a.alertLevel === "critical" ? "text-destructive" : "text-amber-600"}`}>{a.daysRemaining}d</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {(data?.expiringDocuments ?? 0) === 0 ? (
+            <p className="mb-4 text-sm text-muted-foreground">No documents expiring within alert windows.</p>
+          ) : null}
+
+          <div className="mt-2 flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Total expiring</span>
+            <span className="font-semibold text-warning">{data?.expiringDocuments ?? 0}</span>
+          </div>
+          <div className="mt-2 flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Performance reviews due</span>
+            <span className="font-medium">{data?.reviewsDue ?? 0}</span>
+          </div>
 
           <h3 className="mt-6 mb-3 text-sm font-medium">Quick Actions</h3>
           <div className="flex flex-wrap gap-2">
             <Link href="/attendance"><Button variant="secondary"><Clock className="mr-2 h-4 w-4" />Attendance</Button></Link>
             <Link href="/leave"><Button variant="secondary"><Calendar className="mr-2 h-4 w-4" />Request Leave</Button></Link>
+            <Link href="/documents"><Button variant="secondary"><FileWarning className="mr-2 h-4 w-4" />Documents</Button></Link>
             {can("employee:create") ? (
               <Link href="/employees"><Button variant="secondary"><UserPlus className="mr-2 h-4 w-4" />Add Employee</Button></Link>
             ) : null}

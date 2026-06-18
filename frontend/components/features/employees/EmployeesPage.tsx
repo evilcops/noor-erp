@@ -66,7 +66,7 @@ export function EmployeesPage() {
   };
 
   const { data, isLoading, refetch } = useEmployees(params);
-  const { create, update, remove, uploadDoc } = useEmployeeMutations();
+  const { create, update, remove, uploadDoc, uploadFamilyBataka } = useEmployeeMutations();
 
   const branchMap = useMemo(
     () => Object.fromEntries(branches.map((b) => [b._id, b.name])),
@@ -114,19 +114,49 @@ export function EmployeesPage() {
     },
   ];
 
-  async function uploadComplianceFiles(employeeId: string, files: ComplianceFiles) {
+  async function uploadComplianceFiles(
+    employeeId: string,
+    files: ComplianceFiles,
+    form?: EmployeeFormValues
+  ) {
     const entries = Object.entries(files) as [keyof ComplianceFiles, File][];
     await Promise.all(
       entries.map(([type, file]) => {
         const fd = new FormData();
         fd.append("file", file);
         fd.append("type", type);
+        // Send dates so the document record is always complete
+        const docDates = form?.[type as keyof EmployeeFormValues] as
+          | { issuanceDate?: string; expiryDate?: string }
+          | undefined;
+        if (docDates?.issuanceDate) fd.append("issuanceDate", docDates.issuanceDate);
+        if (docDates?.expiryDate) fd.append("expiryDate", docDates.expiryDate);
         return uploadDoc.mutateAsync({ id: employeeId, formData: fd });
       })
     );
   }
 
-  async function handleSubmit(form: EmployeeFormValues, files: ComplianceFiles) {
+  async function uploadFamilyBatakaFiles(
+    employeeId: string,
+    savedMembers: import("@/types/employee").FamilyMember[],
+    files: Map<number, File>
+  ) {
+    await Promise.all(
+      Array.from(files.entries()).map(([idx, file]) => {
+        const memberId = savedMembers[idx]?._id;
+        if (!memberId) return Promise.resolve();
+        const fd = new FormData();
+        fd.append("file", file);
+        return uploadFamilyBataka.mutateAsync({ id: employeeId, memberId, formData: fd });
+      })
+    );
+  }
+
+  async function handleSubmit(
+    form: EmployeeFormValues,
+    files: ComplianceFiles,
+    extra?: { familyType?: "individual" | "family"; familyMembers?: import("@/types/employee").FamilyMember[]; familyBatakaFiles?: Map<number, File> }
+  ) {
     const branch = branches.find((b) => b._id === form.branchId);
     const companyId = user?.companyId ?? branch?.companyId;
     if (!companyId) {
@@ -137,16 +167,23 @@ export function EmployeesPage() {
       toast.error("Select a branch for this employee");
       return;
     }
-    const payload = formToPayload(form, companyId);
+    const payload = formToPayload(form, companyId, extra);
+    const fbFiles = extra?.familyBatakaFiles;
     if (selected && formOpen) {
-      await update.mutateAsync({ id: selected._id, data: payload });
+      const updated = await update.mutateAsync({ id: selected._id, data: payload });
       if (Object.keys(files).length) {
-        await uploadComplianceFiles(selected._id, files);
+        await uploadComplianceFiles(selected._id, files, form);
+      }
+      if (fbFiles?.size && updated?.familyMembers?.length) {
+        await uploadFamilyBatakaFiles(selected._id, updated.familyMembers, fbFiles);
       }
     } else {
       const created = await create.mutateAsync(payload);
       if (Object.keys(files).length && created?._id) {
-        await uploadComplianceFiles(created._id, files);
+        await uploadComplianceFiles(created._id, files, form);
+      }
+      if (fbFiles?.size && created?._id && created?.familyMembers?.length) {
+        await uploadFamilyBatakaFiles(created._id, created.familyMembers, fbFiles);
       }
     }
     setFormOpen(false);

@@ -24,8 +24,11 @@ export function useEmployeeMutations() {
 
   const create = useMutation({
     mutationFn: (data: CreateEmployeeInput) => employeeApi.create(data),
-    onSuccess: () => {
+    onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ["employees"] });
+      if (created?._id) {
+        qc.invalidateQueries({ queryKey: ["employee", created._id] });
+      }
       toast.success("Employee created");
     },
     onError: (e: Error) => toast.error(e.message),
@@ -71,5 +74,14 @@ export function useEmployeeMutations() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  return { create, update, remove, uploadDoc, deleteDoc };
+  const uploadFamilyBataka = useMutation({
+    mutationFn: ({ id, memberId, formData }: { id: string; memberId: string; formData: FormData }) =>
+      employeeApi.uploadFamilyBataka(id, memberId, formData),
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: ["employee", id] });
+    },
+    onError: (e: Error) => toast.error(`Family bataka upload failed: ${e.message}`),
+  });
+
+  return { create, update, remove, uploadDoc, deleteDoc, uploadFamilyBataka };
 }

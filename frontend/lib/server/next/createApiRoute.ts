@@ -9,7 +9,7 @@ import { authenticate } from "../middleware/auth";
 import { auditMiddleware } from "../middleware/audit";
 import { requirePermission } from "../middleware/permission";
 import { validate } from "../middleware/validation";
-import { ensureDevAdmin } from "../services/bootstrap.service";
+import { ensureDevAdmin, runMigrations } from "../services/bootstrap.service";
 import { AppError } from "../utils/AppError";
 import { logger } from "../utils/logger";
 import type { UploadedFile } from "../types/upload";
@@ -18,11 +18,18 @@ type ControllerFn = (req: Request, res: Response, next?: NextFunction) => Promis
 type MiddlewareFn = (req: Request, res: Response, next: NextFunction) => void | Promise<void>;
 
 let devAdminReady = false;
+let migrationsRan = false;
 
 async function ensureDevAdminOnce() {
   if (devAdminReady) return;
   await ensureDevAdmin();
   devAdminReady = true;
+}
+
+async function runMigrationsOnce() {
+  if (migrationsRan) return;
+  await runMigrations();
+  migrationsRan = true;
 }
 
 class MockResponse {
@@ -220,6 +227,7 @@ function createHandler(options: ApiRouteOptions) {
   ): Promise<NextResponse> => {
     await connectDatabase();
     await ensureDevAdminOnce();
+    await runMigrationsOnce();
 
     const params =
       context?.params instanceof Promise ? await context.params : (context?.params ?? {});

@@ -13,6 +13,7 @@ interface ConfirmationModalProps {
   variant?: "danger" | "primary";
   loading?: boolean;
   onConfirm: () => void;
+  zIndex?: number;
 }
 
 export function ConfirmationModal({
@@ -25,6 +26,7 @@ export function ConfirmationModal({
   variant = "primary",
   loading,
   onConfirm,
+  zIndex,
 }: ConfirmationModalProps) {
   return (
     <Modal
@@ -32,6 +34,7 @@ export function ConfirmationModal({
       onOpenChange={onOpenChange}
       title={title}
       size="sm"
+      zIndex={zIndex}
       footer={
         <>
           <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={loading}>

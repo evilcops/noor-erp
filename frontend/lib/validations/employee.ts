@@ -33,7 +33,7 @@ export const employeeFormSchema = z
     hasVehicle: z.boolean().optional(),
     passport: requiredDocSchema,
     driving_license: requiredDocSchema,
-    pataka: requiredDocSchema,
+    bataka: requiredDocSchema,
     // Vehicle docs — validated conditionally in superRefine
     mulkiya: optionalDocSchema.optional(),
     car_insurance: optionalDocSchema.optional(),

@@ -3,7 +3,10 @@ import { attendanceApi } from "@/lib/api/attendance";
 import { employeeApi } from "@/lib/api/employees";
 import { leaveApi } from "@/lib/api/leave";
 import { recruitmentApi } from "@/lib/api/recruitment";
+import { businessDocApi } from "@/lib/api/businessDocuments";
+import { branchDocApi } from "@/lib/api/branchDocuments";
 import type { ExpiringDocumentAlert } from "@/types/employee";
+import type { ExpiringBusinessDocAlert, ExpiringBranchDocAlert } from "@/types/documents";
 
 export interface HrSummary {
   totalEmployees: number;
@@ -21,19 +24,24 @@ export interface DashboardData {
   upcomingHolidays: Array<{ name: string; date: string }>;
   expiringDocuments: number;
   expiringDocumentAlerts: ExpiringDocumentAlert[];
+  expiringBusinessDocAlerts: ExpiringBusinessDocAlert[];
+  expiringBranchDocAlerts: ExpiringBranchDocAlert[];
   reviewsDue: number;
 }
 
 export const dashboardApi = {
   async getHrSummary(): Promise<DashboardData> {
-    const [employees, todayAttendance, leaves, candidates, expiring] = await Promise.all([
-      employeeApi.getAll({ limit: 1 }),
-      attendanceApi.getToday().catch(() => [] as Awaited<ReturnType<typeof attendanceApi.getToday>>),
-      leaveApi.list({ status: "pending", limit: 100 }).catch(() => ({ data: [] })),
-      recruitmentApi.getCandidates({ limit: 100 }).catch(() => ({ data: [] })),
-      // 274 days = 9 months (widest alert window, for passport/driving_license/mulkiya)
-      employeeApi.getExpiringDocuments(274).catch(() => []),
-    ]);
+    const [employees, todayAttendance, leaves, candidates, expiring, expiringBiz, expiringBranch] =
+      await Promise.all([
+        employeeApi.getAll({ limit: 1 }),
+        attendanceApi.getToday().catch(() => [] as Awaited<ReturnType<typeof attendanceApi.getToday>>),
+        leaveApi.list({ status: "pending", limit: 100 }).catch(() => ({ data: [] })),
+        recruitmentApi.getCandidates({ limit: 100 }).catch(() => ({ data: [] })),
+        // 274 days = passport 9-month window
+        employeeApi.getExpiringDocuments(274).catch(() => []),
+        businessDocApi.getExpiring().catch(() => [] as ExpiringBusinessDocAlert[]),
+        branchDocApi.getExpiring().catch(() => [] as ExpiringBranchDocAlert[]),
+      ]);
 
     const presentToday = todayAttendance.filter((a) => a.timeIn).length;
     const lateToday = todayAttendance.filter((a) => a.isLate).length;
@@ -68,8 +76,10 @@ export const dashboardApi = {
       })),
       pendingInterviews,
       upcomingHolidays: [],
-      expiringDocuments: alerts.length,
+      expiringDocuments: alerts.length + (Array.isArray(expiringBiz) ? expiringBiz.length : 0) + (Array.isArray(expiringBranch) ? expiringBranch.length : 0),
       expiringDocumentAlerts: alerts,
+      expiringBusinessDocAlerts: Array.isArray(expiringBiz) ? expiringBiz as ExpiringBusinessDocAlert[] : [],
+      expiringBranchDocAlerts: Array.isArray(expiringBranch) ? expiringBranch as ExpiringBranchDocAlert[] : [],
       reviewsDue: 0,
     };
   },

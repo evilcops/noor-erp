@@ -18,7 +18,7 @@ function getDocLabel(type: string): string {
   const map: Record<string, string> = {
     passport: "Passport",
     driving_license: "Driving License",
-    pataka: "Pataka (Residency Permit / ID)",
+    bataka: "Bataka (Residency Permit / ID)",
     mulkiya: "Mulkiya (Vehicle Registration)",
     car_insurance: "Car Insurance",
     visa: "Visa",

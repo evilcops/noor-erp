@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AlertTriangle, Eye } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, Eye, Plus, Trash2, Upload, User } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
@@ -19,6 +19,8 @@ import type {
   ComplianceFiles,
   Employee,
   EmployeeDocument,
+  FamilyMember,
+  FamilyRelationship,
 } from "@/types/employee";
 
 const DEPARTMENTS = ["HR", "IT", "Sales", "Operations", "Finance", "Marketing"];
@@ -40,7 +42,7 @@ const STATUS_OPTIONS = [
 const COMPLIANCE_DOC_KEYS = [
   "passport",
   "driving_license",
-  "pataka",
+  "bataka",
   "mulkiya",
   "car_insurance",
 ] as const;
@@ -57,9 +59,9 @@ const DOC_FIELDS = [
   "driving_license.issuanceDate",
   "driving_license.expiryDate",
   "driving_license.file",
-  "pataka.issuanceDate",
-  "pataka.expiryDate",
-  "pataka.file",
+  "bataka.issuanceDate",
+  "bataka.expiryDate",
+  "bataka.file",
   "mulkiya.issuanceDate",
   "mulkiya.expiryDate",
   "mulkiya.file",
@@ -93,7 +95,7 @@ const EMPTY: EmployeeFormValues = {
   hasVehicle: false,
   passport: { issuanceDate: "", expiryDate: "" },
   driving_license: { issuanceDate: "", expiryDate: "" },
-  pataka: { issuanceDate: "", expiryDate: "" },
+  bataka: { issuanceDate: "", expiryDate: "" },
   mulkiya: { issuanceDate: "", expiryDate: "" },
   car_insurance: { issuanceDate: "", expiryDate: "" },
 };
@@ -104,7 +106,7 @@ interface EmployeeFormModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   employee?: Employee | null;
-  onSubmit: (values: EmployeeFormValues, files: ComplianceFiles) => Promise<void>;
+  onSubmit: (values: EmployeeFormValues, files: ComplianceFiles, extra?: { familyType?: "individual" | "family"; familyMembers?: FamilyMember[]; familyBatakaFiles?: Map<number, File> }) => Promise<void>;
   onUploadDocument?: (file: File, type: string, issuanceDate: string, expiryDate: string) => Promise<void>;
   loading?: boolean;
 }
@@ -123,6 +125,10 @@ export function EmployeeFormModal({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [files, setFiles] = useState<ComplianceFiles>(EMPTY_FILES);
   const [viewerDoc, setViewerDoc] = useState<EmployeeDocument | null>(null);
+  const [familyType, setFamilyType] = useState<"individual" | "family">("individual");
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
+  const [profilePicFile, setProfilePicFile] = useState<File | null>(null);
+  const [familyBatakaFiles, setFamilyBatakaFiles] = useState<Map<number, File>>(new Map());
 
   useEffect(() => {
     if (employee) {
@@ -154,7 +160,7 @@ export function EmployeeFormModal({
         hasVehicle: employee.hasVehicle ?? false,
         passport: findDoc("passport"),
         driving_license: findDoc("driving_license"),
-        pataka: findDoc("pataka"),
+        bataka: findDoc("bataka"),
         mulkiya: findDoc("mulkiya"),
         car_insurance: findDoc("car_insurance"),
       });
@@ -162,6 +168,10 @@ export function EmployeeFormModal({
       setForm({ ...EMPTY, branchId: branches[0]?._id ?? "" });
     }
     setFiles(EMPTY_FILES);
+    setFamilyType(employee?.familyType ?? "individual");
+    setFamilyMembers(employee?.familyMembers ?? []);
+    setProfilePicFile(null);
+    setFamilyBatakaFiles(new Map());
     setTab("personal");
     setErrors({});
   }, [employee, open, branches]);
@@ -239,7 +249,7 @@ export function EmployeeFormModal({
     const activeDocKeys: ComplianceKey[] = [
       "passport",
       "driving_license",
-      "pataka",
+      "bataka",
       ...(form.hasVehicle ? (["mulkiya", "car_insurance"] as ComplianceKey[]) : []),
     ];
     for (const key of activeDocKeys) {
@@ -264,7 +274,7 @@ export function EmployeeFormModal({
       return;
     }
 
-    await onSubmit(form, files);
+    await onSubmit(form, files, { familyType, familyMembers, familyBatakaFiles });
   }
 
   const personalErrorCount = countErrors(errors, PERSONAL_FIELDS);
@@ -295,6 +305,7 @@ export function EmployeeFormModal({
           { id: "employment", label: "Employment", errorCount: employmentErrorCount },
           { id: "status", label: "Status", errorCount: statusErrorCount },
           { id: "documents", label: "Documents", errorCount: docErrorCount },
+          { id: "family", label: "Family" },
         ]}
         activeTab={tab}
         onChange={setTab}
@@ -490,6 +501,25 @@ export function EmployeeFormModal({
         />
       ) : null}
 
+      {/* ── Family ── */}
+      {tab === "family" ? (
+        <FamilyTab
+          familyType={familyType}
+          familyMembers={familyMembers}
+          onToggleType={(t) => setFamilyType(t)}
+          onUpdate={setFamilyMembers}
+          familyBatakaFiles={familyBatakaFiles}
+          onUpdateBatakaFile={(idx, file) => {
+            setFamilyBatakaFiles((prev) => {
+              const next = new Map(prev);
+              if (file) next.set(idx, file);
+              else next.delete(idx);
+              return next;
+            });
+          }}
+        />
+      ) : null}
+
       <DocumentViewer
         doc={viewerDoc}
         open={viewerDoc !== null}
@@ -534,7 +564,7 @@ function DocumentsTab({
   const activeKeys: ComplianceKey[] = [
     "passport",
     "driving_license",
-    "pataka",
+    "bataka",
     ...(form.hasVehicle ? (["mulkiya", "car_insurance"] as ComplianceKey[]) : []),
   ];
   for (const key of activeKeys) {
@@ -547,7 +577,7 @@ function DocumentsTab({
       const labels: Record<string, string> = {
         passport: "Passport",
         driving_license: "Driving License",
-        pataka: "Pataka",
+        bataka: "Bataka",
         mulkiya: "Mulkiya",
         car_insurance: "Car Insurance",
       };
@@ -610,21 +640,21 @@ function DocumentsTab({
         onView={(d) => onSetViewerDoc(d)}
       />
 
-      {/* Pataka */}
+      {/* Bataka */}
       <ComplianceDocRow
-        label="Pataka (Residency Permit / ID)"
+        label="Bataka (Residency Permit / ID)"
         required
         alertNote="Alerts at 2 months, 1 month, 15 days before expiry"
-        issuanceDate={form.pataka?.issuanceDate ?? ""}
-        expiryDate={form.pataka?.expiryDate ?? ""}
-        file={files.pataka}
-        existingDoc={findExistingDoc("pataka")}
-        issuanceDateError={errors["pataka.issuanceDate"]}
-        expiryDateError={errors["pataka.expiryDate"]}
-        fileError={errors["pataka.file"]}
-        onIssuanceChange={(v) => onUpdateDocDate("pataka", "issuanceDate", v)}
-        onExpiryChange={(v) => onUpdateDocDate("pataka", "expiryDate", v)}
-        onFileChange={(f) => onSetDocFile("pataka", f)}
+        issuanceDate={form.bataka?.issuanceDate ?? ""}
+        expiryDate={form.bataka?.expiryDate ?? ""}
+        file={files.bataka}
+        existingDoc={findExistingDoc("bataka")}
+        issuanceDateError={errors["bataka.issuanceDate"]}
+        expiryDateError={errors["bataka.expiryDate"]}
+        fileError={errors["bataka.file"]}
+        onIssuanceChange={(v) => onUpdateDocDate("bataka", "issuanceDate", v)}
+        onExpiryChange={(v) => onUpdateDocDate("bataka", "expiryDate", v)}
+        onFileChange={(f) => onSetDocFile("bataka", f)}
         onView={(d) => onSetViewerDoc(d)}
       />
 
@@ -881,6 +911,223 @@ function LegacyDocUpload({ employee, onUploadDocument }: LegacyDocUploadProps) {
 }
 
 // ---------------------------------------------------------------------------
+// FamilyTab
+// ---------------------------------------------------------------------------
+
+const RELATIONSHIP_OPTIONS: { value: FamilyRelationship; label: string }[] = [
+  { value: "spouse", label: "Spouse" },
+  { value: "son", label: "Son" },
+  { value: "daughter", label: "Daughter" },
+  { value: "parents", label: "Parents" },
+];
+
+function FamilyTab({
+  familyType,
+  familyMembers,
+  onToggleType,
+  onUpdate,
+  familyBatakaFiles,
+  onUpdateBatakaFile,
+}: {
+  familyType: "individual" | "family";
+  familyMembers: FamilyMember[];
+  onToggleType: (t: "individual" | "family") => void;
+  onUpdate: (members: FamilyMember[]) => void;
+  familyBatakaFiles: Map<number, File>;
+  onUpdateBatakaFile: (idx: number, file: File | null) => void;
+}) {
+  const [expanded, setExpanded] = useState<Set<number>>(new Set([0]));
+
+  function addMember() {
+    const next = [...familyMembers, { name: "", relationship: "spouse" as FamilyRelationship }];
+    onUpdate(next);
+    setExpanded((s) => new Set([...s, next.length - 1]));
+  }
+
+  function removeMember(idx: number) {
+    onUpdate(familyMembers.filter((_, i) => i !== idx));
+    setExpanded((s) => {
+      const next = new Set<number>();
+      s.forEach((v) => { if (v < idx) next.add(v); else if (v > idx) next.add(v - 1); });
+      return next;
+    });
+  }
+
+  function updateMember(idx: number, patch: Partial<FamilyMember>) {
+    onUpdate(familyMembers.map((m, i) => (i === idx ? { ...m, ...patch } : m)));
+  }
+
+  function updateBataka(idx: number, field: "issueDate" | "expiryDate", value: string) {
+    onUpdate(
+      familyMembers.map((x, i) =>
+        i === idx
+          ? { ...x, bataka: { ...x.bataka, status: "valid" as const, [field]: value } }
+          : x
+      )
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Individual / Family toggle */}
+      <div className="flex items-center gap-4 rounded-lg border border-border bg-muted/30 px-4 py-3">
+        <p className="text-sm font-medium">Employee Type</p>
+        <div className="flex gap-2">
+          {(["individual", "family"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => onToggleType(t)}
+              className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors capitalize ${
+                familyType === t
+                  ? "border-brand bg-brand text-white"
+                  : "border-border bg-card text-muted-foreground hover:border-brand/60"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {familyType === "family" ? (
+        <div className="space-y-3">
+          {familyMembers.map((member, idx) => {
+            const isOpen = expanded.has(idx);
+            return (
+              <div key={idx} className="rounded-xl border border-border bg-card">
+                {/* Collapsible header */}
+                <div className="flex items-center justify-between px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpanded((s) => {
+                        const n = new Set(s);
+                        n.has(idx) ? n.delete(idx) : n.add(idx);
+                        return n;
+                      })
+                    }
+                    className="flex flex-1 items-center gap-2 text-left"
+                  >
+                    <User className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span className="text-sm font-medium">
+                      {member.name || `Family Member ${idx + 1}`}
+                      {member.relationship ? (
+                        <span className="ml-2 text-xs text-muted-foreground capitalize">({member.relationship})</span>
+                      ) : null}
+                    </span>
+                    <span className="ml-auto text-xs text-muted-foreground">{isOpen ? "▲" : "▼"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeMember(idx)}
+                    className="ml-3 rounded-md p-1.5 text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {isOpen ? (
+                  <div className="grid gap-4 border-t border-border px-4 pb-4 pt-3 sm:grid-cols-2">
+                    <div>
+                      <Label>Name *</Label>
+                      <Input
+                        value={member.name}
+                        onChange={(e) => updateMember(idx, { name: e.target.value })}
+                        placeholder="Full name"
+                      />
+                    </div>
+                    <div>
+                      <Label>Relationship *</Label>
+                      <Select
+                        value={member.relationship}
+                        onChange={(e) => updateMember(idx, { relationship: e.target.value as FamilyRelationship })}
+                        options={RELATIONSHIP_OPTIONS}
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <p className="mb-2 text-sm font-medium">Bataka (ID Card)</p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Issue Date</Label>
+                          <Input
+                            type="date"
+                            value={member.bataka?.issueDate?.slice(0, 10) ?? ""}
+                            onChange={(e) => updateBataka(idx, "issueDate", e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Expiry Date</Label>
+                          <Input
+                            type="date"
+                            value={member.bataka?.expiryDate?.slice(0, 10) ?? ""}
+                            onChange={(e) => updateBataka(idx, "expiryDate", e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      {/* File upload */}
+                      <div className="mt-3">
+                        <Label className="text-xs text-muted-foreground">Document File</Label>
+                        <div className="mt-1 flex items-center gap-2">
+                          <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-sm hover:border-brand/60 hover:bg-muted/30">
+                            <Upload className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-muted-foreground">
+                              {familyBatakaFiles.get(idx)?.name ?? "Choose file…"}
+                            </span>
+                            <input
+                              type="file"
+                              accept=".pdf,.jpg,.jpeg,.png"
+                              className="hidden"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0] ?? null;
+                                onUpdateBatakaFile(idx, f);
+                              }}
+                            />
+                          </label>
+                          {familyBatakaFiles.get(idx) && (
+                            <button
+                              type="button"
+                              onClick={() => onUpdateBatakaFile(idx, null)}
+                              className="rounded p-1 text-destructive hover:bg-destructive/10"
+                              title="Remove file"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                        {!familyBatakaFiles.get(idx) && member.bataka?.fileUrl && (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Existing file uploaded — select a new file to replace
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+
+          <button
+            type="button"
+            onClick={addMember}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-brand/40 py-3 text-sm font-medium text-brand hover:border-brand hover:bg-brand/5"
+          >
+            <Plus className="h-4 w-4" />
+            Add Family Member
+          </button>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Toggle to "Family" to add dependent family members whose documents need tracking.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // formToPayload
 // ---------------------------------------------------------------------------
 
@@ -894,11 +1141,15 @@ function pickDocDates(
   };
 }
 
-export function formToPayload(form: EmployeeFormValues, companyId: string) {
+export function formToPayload(
+  form: EmployeeFormValues,
+  companyId: string,
+  extra?: { familyType?: "individual" | "family"; familyMembers?: FamilyMember[] }
+) {
   const complianceDocs: ComplianceDocs = {
     passport: pickDocDates(form.passport),
     driving_license: pickDocDates(form.driving_license),
-    pataka: pickDocDates(form.pataka),
+    bataka: pickDocDates(form.bataka),
     ...(form.hasVehicle
       ? {
           mulkiya: pickDocDates(form.mulkiya),
@@ -934,5 +1185,7 @@ export function formToPayload(form: EmployeeFormValues, companyId: string) {
     notes: form.notes || undefined,
     hasVehicle: form.hasVehicle ?? false,
     complianceDocs: hasAnyDoc ? complianceDocs : undefined,
+    familyType: extra?.familyType,
+    familyMembers: extra?.familyMembers,
   };
 }

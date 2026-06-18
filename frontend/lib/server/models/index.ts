@@ -9,3 +9,5 @@ export { Recruitment, type IRecruitment } from "./Recruitment.model";
 export { Performance, type IPerformance } from "./Performance.model";
 export { AuditLog, type IAuditLog } from "./AuditLog.model";
 export { Notification, type INotification } from "./Notification.model";
+export { BusinessDocument, type IBusinessDocument } from "./BusinessDocument.model";
+export { BranchDocument, type IBranchDocument } from "./BranchDocument.model";

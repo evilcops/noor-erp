@@ -1,10 +1,27 @@
 import mongoose, { Schema, type Document, type Model } from "mongoose";
 import { softDeletePlugin } from "./plugins/softDelete";
 
+export type FamilyRelationship = "spouse" | "son" | "daughter" | "parents";
+
+export interface IFamilyMemberDocument {
+  issueDate?: Date;
+  expiryDate?: Date;
+  fileUrl?: string;
+  status: "valid" | "expired" | "expiring_soon";
+}
+
+export interface IFamilyMember {
+  _id?: mongoose.Types.ObjectId;
+  name: string;
+  profilePicture?: string;
+  relationship: FamilyRelationship;
+  bataka?: IFamilyMemberDocument;
+}
+
 export type ComplianceDocType =
   | "passport"
   | "driving_license"
-  | "pataka"
+  | "bataka"
   | "mulkiya"
   | "car_insurance";
 
@@ -49,7 +66,10 @@ export interface IEmployee extends Document {
   contractStartDate?: Date;
   contractEndDate?: Date;
   status: "active" | "on_leave" | "suspended" | "resigned" | "terminated" | "archived";
+  profilePicture?: string;
   hasVehicle?: boolean;
+  familyType?: "individual" | "family";
+  familyMembers?: IFamilyMember[];
   documents: IEmployeeDocument[];
   notes?: string;
   createdBy?: mongoose.Types.ObjectId;
@@ -90,7 +110,30 @@ const employeeSchema = new Schema<IEmployee>(
       enum: ["active", "on_leave", "suspended", "resigned", "terminated", "archived"],
       default: "active",
     },
+    profilePicture: String,
     hasVehicle: { type: Boolean, default: false },
+    familyType: { type: String, enum: ["individual", "family"], default: "individual" },
+    familyMembers: [
+      {
+        name: { type: String, required: true },
+        profilePicture: String,
+        relationship: {
+          type: String,
+          enum: ["spouse", "son", "daughter", "parents"],
+          required: true,
+        },
+        bataka: {
+          issueDate: Date,
+          expiryDate: Date,
+          fileUrl: String,
+          status: {
+            type: String,
+            enum: ["valid", "expired", "expiring_soon"],
+            default: "valid",
+          },
+        },
+      },
+    ],
     documents: [
       {
         type: {
@@ -98,7 +141,8 @@ const employeeSchema = new Schema<IEmployee>(
           enum: [
             "passport",
             "driving_license",
-            "pataka",
+            "bataka",
+            "pataka", // legacy — renamed to bataka; kept to prevent validation errors on old records until migration runs
             "mulkiya",
             "car_insurance",
             "visa",

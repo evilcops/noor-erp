@@ -18,4 +18,10 @@ export const companyApi = {
 
   create: (data: { name: string; code: string; email?: string; phone?: string; address?: string }) =>
     apiRequest<Company>("/companies", { method: "POST", body: JSON.stringify(data) }),
+
+  update: (id: string, data: Partial<{ name: string; email: string; phone: string; address: string; status: string }>) =>
+    apiRequest<Company>(`/companies/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+
+  delete: (id: string) =>
+    apiRequest<{ message: string }>(`/companies/${id}`, { method: "DELETE" }),
 };

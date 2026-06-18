@@ -17,17 +17,13 @@ import {
 } from "../utils/apiResponse";
 import { AppError } from "../utils/AppError";
 
-// Alert thresholds in days per document type group
-const LONG_ALERT_DAYS = [274, 182, 91] as const;  // 9 months, 6 months, 3 months
-const SHORT_ALERT_DAYS = [61, 30, 15] as const;    // 2 months, 1 month, 15 days
-const LONG_ALERT_TYPES: ComplianceDocType[] = ["passport", "driving_license", "mulkiya"];
-const SHORT_ALERT_TYPES: ComplianceDocType[] = ["pataka", "car_insurance"];
-const MAX_THRESHOLD_DAYS = Math.max(...LONG_ALERT_DAYS, ...SHORT_ALERT_DAYS); // 274
+// Passport: 9 / 6 / 3 months; all other docs: 45 / 30 / 15 days
+const PASSPORT_ALERT_DAYS = [274, 182, 91] as const;
+const STD_ALERT_DAYS = [45, 30, 15] as const;
+const MAX_THRESHOLD_DAYS = Math.max(...PASSPORT_ALERT_DAYS); // 274
 
 function getAlertThresholdDays(type: string): readonly number[] {
-  if (LONG_ALERT_TYPES.includes(type as ComplianceDocType)) return LONG_ALERT_DAYS;
-  if (SHORT_ALERT_TYPES.includes(type as ComplianceDocType)) return SHORT_ALERT_DAYS;
-  return SHORT_ALERT_DAYS; // default for legacy doc types
+  return type === "passport" ? PASSPORT_ALERT_DAYS : STD_ALERT_DAYS;
 }
 
 function resolveAlertLevel(
@@ -53,7 +49,7 @@ function buildComplianceDocs(
 ) {
   if (!complianceDocs) return [];
 
-  const alwaysVisible: ComplianceDocType[] = ["passport", "driving_license", "pataka"];
+  const alwaysVisible: ComplianceDocType[] = ["passport", "driving_license", "bataka"];
   const vehicleOnly: ComplianceDocType[] = ["mulkiya", "car_insurance"];
   const docTypes = hasVehicle ? [...alwaysVisible, ...vehicleOnly] : alwaysVisible;
 
@@ -147,16 +143,24 @@ export async function updateEmployee(req: Request, res: Response) {
     oldValue: employee.toObject() as unknown as Record<string, unknown>,
   };
 
-  const { complianceDocs, hasVehicle, ...rest } = req.body as {
+  const { complianceDocs, hasVehicle, familyType, familyMembers, ...rest } = req.body as {
     complianceDocs?: Record<string, ComplianceDocInput>;
     hasVehicle?: boolean;
+    familyType?: "individual" | "family";
+    familyMembers?: Array<{
+      _id?: string;
+      name: string;
+      relationship: string;
+      profilePicture?: string;
+      bataka?: { issueDate?: string; expiryDate?: string; fileUrl?: string; status?: string };
+    }>;
     [key: string]: unknown;
   };
 
   // When hasVehicle changes, rebuild compliance documents
   if (complianceDocs !== undefined || hasVehicle !== undefined) {
     const effectiveHasVehicle = hasVehicle ?? employee.hasVehicle ?? false;
-    const updatedComplianceDocs = buildComplianceDocs(
+    const builtDocs = buildComplianceDocs(
       complianceDocs,
       effectiveHasVehicle,
       String(req.user!._id)
@@ -165,15 +169,57 @@ export async function updateEmployee(req: Request, res: Response) {
     const complianceTypes = [
       "passport",
       "driving_license",
-      "pataka",
+      "bataka",
       "mulkiya",
       "car_insurance",
     ];
     const nonComplianceDocs = employee.documents.filter(
       (d) => !complianceTypes.includes(d.type)
     );
-    employee.documents = [...nonComplianceDocs, ...updatedComplianceDocs] as typeof employee.documents;
+
+    // Merge new date data with existing fileUrls — rebuilding must not lose uploaded files
+    const mergedDocs = builtDocs.map((newDoc) => {
+      const existing = employee.documents.find((d) => d.type === newDoc.type);
+      return {
+        ...newDoc,
+        fileUrl: existing?.fileUrl ?? newDoc.fileUrl,
+        uploadedAt: existing?.uploadedAt ?? newDoc.uploadedAt,
+        uploadedBy: existing?.uploadedBy ?? newDoc.uploadedBy,
+        _id: existing?._id,
+      };
+    });
+
+    employee.documents = [...nonComplianceDocs, ...mergedDocs] as typeof employee.documents;
     employee.hasVehicle = effectiveHasVehicle;
+  }
+
+  // Update family type and members explicitly (Object.assign doesn't merge Mongoose subdoc arrays)
+  if (familyType !== undefined) employee.familyType = familyType;
+  if (familyMembers !== undefined) {
+    // Preserve existing bataka.fileUrl for members that already have one
+    employee.familyMembers = familyMembers.map((incoming) => {
+      const existing = (employee.familyMembers ?? []).find(
+        (m) => incoming._id && String(m._id) === incoming._id
+      );
+      return {
+        ...incoming,
+        bataka: incoming.bataka
+          ? {
+              ...incoming.bataka,
+              // Keep previously uploaded file if no new one is specified
+              fileUrl: incoming.bataka.fileUrl ?? existing?.bataka?.fileUrl,
+              status: (incoming.bataka.status ?? existing?.bataka?.status ?? "valid") as "valid" | "expired" | "expiring_soon",
+            }
+          : existing?.bataka
+          ? {
+              issueDate: existing.bataka.issueDate,
+              expiryDate: existing.bataka.expiryDate,
+              fileUrl: existing.bataka.fileUrl,
+              status: existing.bataka.status ?? "valid",
+            }
+          : undefined,
+      };
+    }) as typeof employee.familyMembers;
   }
 
   Object.assign(employee, rest, { updatedBy: req.user!._id });
@@ -222,34 +268,84 @@ export async function uploadDocument(req: Request, res: Response) {
     docType
   );
 
-  const doc = {
-    type: docType,
-    number: req.body.number,
-    fileUrl,
-    issuanceDate: req.body.issuanceDate ? new Date(req.body.issuanceDate) : undefined,
-    expiryDate: req.body.expiryDate ? new Date(req.body.expiryDate) : undefined,
-    status: "valid" as const,
-    uploadedAt: new Date(),
-    uploadedBy: req.user!._id,
-  };
-
-  // For compliance doc types, replace the existing entry rather than appending
   const complianceTypes = [
     "passport",
     "driving_license",
-    "pataka",
+    "bataka",
     "mulkiya",
     "car_insurance",
   ];
-  if (complianceTypes.includes(doc.type)) {
-    const existingIdx = employee.documents.findIndex((d) => d.type === doc.type);
+
+  if (complianceTypes.includes(docType)) {
+    const existingIdx = employee.documents.findIndex((d) => d.type === docType);
     if (existingIdx >= 0) {
-      Object.assign(employee.documents[existingIdx], doc);
+      // Selectively update — never overwrite dates/number with undefined from the upload request
+      const existing = employee.documents[existingIdx];
+      existing.fileUrl = fileUrl;
+      existing.status = "valid";
+      existing.uploadedAt = new Date();
+      existing.uploadedBy = req.user!._id as typeof existing.uploadedBy;
+      if (req.body.issuanceDate) existing.issuanceDate = new Date(req.body.issuanceDate);
+      if (req.body.expiryDate) existing.expiryDate = new Date(req.body.expiryDate);
+      if (req.body.number) existing.number = req.body.number;
     } else {
-      employee.documents.push(doc);
+      employee.documents.push({
+        type: docType as typeof employee.documents[0]["type"],
+        fileUrl,
+        issuanceDate: req.body.issuanceDate ? new Date(req.body.issuanceDate) : undefined,
+        expiryDate: req.body.expiryDate ? new Date(req.body.expiryDate) : undefined,
+        number: req.body.number,
+        status: "valid",
+        uploadedAt: new Date(),
+        uploadedBy: req.user!._id as typeof employee.documents[0]["uploadedBy"],
+      });
     }
   } else {
-    employee.documents.push(doc);
+    employee.documents.push({
+      type: docType as typeof employee.documents[0]["type"],
+      fileUrl,
+      issuanceDate: req.body.issuanceDate ? new Date(req.body.issuanceDate) : undefined,
+      expiryDate: req.body.expiryDate ? new Date(req.body.expiryDate) : undefined,
+      number: req.body.number,
+      status: "valid",
+      uploadedAt: new Date(),
+      uploadedBy: req.user!._id as typeof employee.documents[0]["uploadedBy"],
+    });
+  }
+
+  await employee.save();
+  return sendSuccess(res, employee, 201);
+}
+
+export async function uploadFamilyBataka(req: Request, res: Response) {
+  const employee = await Employee.findById(req.params.id);
+  if (!employee) throw new AppError("NOT_FOUND", "Employee not found", 404);
+  assertBranchAccess(req.user!, employee.branchId, employee.companyId);
+
+  // memberId comes from request body (flat route, no nested :memberId param)
+  const memberId = String(req.body.memberId ?? req.query.memberId ?? "");
+  if (!memberId) throw new AppError("VALIDATION_ERROR", "memberId is required", 400);
+
+  const memberIdx = (employee.familyMembers ?? []).findIndex(
+    (m) => String(m._id) === memberId
+  );
+  if (memberIdx === -1) throw new AppError("NOT_FOUND", "Family member not found", 404);
+  const member = employee.familyMembers![memberIdx];
+
+  if (!req.file) throw new AppError("VALIDATION_ERROR", "File required", 400);
+
+  const fileUrl = await persistFile(
+    req.file.buffer,
+    req.file.originalname,
+    String(employee._id),
+    `family-bataka-${memberId}`
+  );
+
+  if (!member.bataka) {
+    (member as Record<string, unknown>).bataka = { status: "valid", fileUrl };
+  } else {
+    member.bataka.fileUrl = fileUrl;
+    member.bataka.status = "valid";
   }
 
   await employee.save();
@@ -271,7 +367,7 @@ export async function deleteDocument(req: Request, res: Response) {
  * Returns all employee documents that are within an alert threshold.
  * Uses type-specific thresholds:
  *   passport, driving_license, mulkiya → 9 / 6 / 3 months
- *   pataka, car_insurance              → 2 months / 1 month / 15 days
+ *   bataka, car_insurance              → 2 months / 1 month / 15 days
  *
  * Pass ?days=N to override the outer window (useful for tighter dashboard queries).
  */
@@ -287,31 +383,50 @@ export async function getExpiringDocuments(req: Request, res: Response) {
   const employees = await Employee.find(filter).lean();
   const now = Date.now();
 
-  const expiring = employees.flatMap((emp) =>
-    (emp.documents ?? []).flatMap((d) => {
+  const expiring = employees.flatMap((emp) => {
+    const employeeName = `${emp.firstName} ${emp.lastName}`;
+
+    // Personal compliance documents
+    const docAlerts = (emp.documents ?? []).flatMap((d) => {
       if (!d.expiryDate) return [];
-
-      const expiryMs = new Date(d.expiryDate).getTime();
-      const daysRemaining = Math.ceil((expiryMs - now) / (1000 * 60 * 60 * 24));
-
+      const daysRemaining = Math.ceil(
+        (new Date(d.expiryDate).getTime() - now) / 86_400_000
+      );
       if (daysRemaining > requestedDays) return [];
-
       const thresholds = getAlertThresholdDays(d.type);
       const alertLevel = resolveAlertLevel(daysRemaining, thresholds);
       if (!alertLevel) return [];
+      return [{ employeeId: emp._id, employeeCode: emp.employeeId, employeeName, document: d, daysRemaining, alertLevel, isFamilyAlert: false }];
+    });
 
-      return [
-        {
-          employeeId: emp._id,
-          employeeCode: emp.employeeId,
-          employeeName: `${emp.firstName} ${emp.lastName}`,
-          document: d,
-          daysRemaining,
-          alertLevel,
+    // Family member bataka alerts — message: "Visa expiring for the family of [Employee Name]"
+    const familyAlerts = (emp.familyMembers ?? []).flatMap((member) => {
+      if (!member.bataka?.expiryDate) return [];
+      const daysRemaining = Math.ceil(
+        (new Date(member.bataka.expiryDate).getTime() - now) / 86_400_000
+      );
+      if (daysRemaining > requestedDays) return [];
+      const alertLevel = resolveAlertLevel(daysRemaining, STD_ALERT_DAYS);
+      if (!alertLevel) return [];
+      return [{
+        employeeId: emp._id,
+        employeeCode: emp.employeeId,
+        employeeName: `Visa expiring for the family of ${employeeName}`,
+        document: {
+          type: "bataka" as const,
+          expiryDate: member.bataka.expiryDate,
+          status: "expiring_soon" as const,
+          uploadedAt: new Date(),
         },
-      ];
-    })
-  );
+        daysRemaining,
+        alertLevel,
+        isFamilyAlert: true,
+        familyMemberName: member.name,
+      }];
+    });
+
+    return [...docAlerts, ...familyAlerts];
+  });
 
   return sendSuccess(res, expiring);
 }
