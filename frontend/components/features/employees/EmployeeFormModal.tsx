@@ -106,6 +106,9 @@ interface EmployeeFormModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   employee?: Employee | null;
+  initialTab?: "personal" | "employment" | "status" | "documents" | "family";
+  focusDocType?: ComplianceDocType;
+  focusFamilyMemberId?: string;
   onSubmit: (values: EmployeeFormValues, files: ComplianceFiles, extra?: { familyType?: "individual" | "family"; familyMembers?: FamilyMember[]; familyBatakaFiles?: Map<number, File> }) => Promise<void>;
   onUploadDocument?: (file: File, type: string, issuanceDate: string, expiryDate: string) => Promise<void>;
   loading?: boolean;
@@ -115,6 +118,9 @@ export function EmployeeFormModal({
   open,
   onOpenChange,
   employee,
+  initialTab,
+  focusDocType,
+  focusFamilyMemberId,
   onSubmit,
   onUploadDocument,
   loading,
@@ -172,9 +178,18 @@ export function EmployeeFormModal({
     setFamilyMembers(employee?.familyMembers ?? []);
     setProfilePicFile(null);
     setFamilyBatakaFiles(new Map());
-    setTab("personal");
+    setTab(initialTab ?? "personal");
     setErrors({});
-  }, [employee, open, branches]);
+  }, [employee, open, branches, initialTab]);
+
+  // Scroll to focused document row when opening from dashboard expiry alert
+  useEffect(() => {
+    if (!open || tab !== "documents" || !focusDocType) return;
+    const timer = window.setTimeout(() => {
+      document.getElementById(`doc-row-${focusDocType}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [open, tab, focusDocType]);
 
   function updateField<K extends keyof EmployeeFormValues>(key: K, value: EmployeeFormValues[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -492,7 +507,7 @@ export function EmployeeFormModal({
           files={files}
           errors={errors}
           employee={employee}
-          viewerDoc={viewerDoc}
+          focusDocType={focusDocType}
           onUpdateDocDate={updateDocDate}
           onSetDocFile={setDocFile}
           onToggleVehicle={toggleVehicle}
@@ -506,6 +521,7 @@ export function EmployeeFormModal({
         <FamilyTab
           familyType={familyType}
           familyMembers={familyMembers}
+          focusFamilyMemberId={focusFamilyMemberId}
           onToggleType={(t) => setFamilyType(t)}
           onUpdate={setFamilyMembers}
           familyBatakaFiles={familyBatakaFiles}
@@ -540,7 +556,7 @@ interface DocumentsTabProps {
   files: ComplianceFiles;
   errors: Record<string, string>;
   employee?: Employee | null;
-  viewerDoc: EmployeeDocument | null;
+  focusDocType?: ComplianceDocType;
   onUpdateDocDate: (key: ComplianceKey, field: "issuanceDate" | "expiryDate", v: string) => void;
   onSetDocFile: (key: ComplianceKey, file: File | undefined) => void;
   onToggleVehicle: (checked: boolean) => void;
@@ -553,6 +569,7 @@ function DocumentsTab({
   files,
   errors,
   employee,
+  focusDocType,
   onUpdateDocDate,
   onSetDocFile,
   onToggleVehicle,
@@ -606,6 +623,8 @@ function DocumentsTab({
 
       {/* Passport */}
       <ComplianceDocRow
+        docKey="passport"
+        highlighted={focusDocType === "passport"}
         label="Passport"
         required
         alertNote="Alerts at 9 months, 6 months, 3 months before expiry"
@@ -624,6 +643,8 @@ function DocumentsTab({
 
       {/* Driving License */}
       <ComplianceDocRow
+        docKey="driving_license"
+        highlighted={focusDocType === "driving_license"}
         label="Driving License"
         required
         alertNote="Alerts at 9 months, 6 months, 3 months before expiry"
@@ -642,6 +663,8 @@ function DocumentsTab({
 
       {/* Bataka */}
       <ComplianceDocRow
+        docKey="bataka"
+        highlighted={focusDocType === "bataka"}
         label="Bataka (Residency Permit / ID)"
         required
         alertNote="Alerts at 2 months, 1 month, 15 days before expiry"
@@ -680,6 +703,8 @@ function DocumentsTab({
           </p>
 
           <ComplianceDocRow
+            docKey="mulkiya"
+            highlighted={focusDocType === "mulkiya"}
             label="Mulkiya (Vehicle Registration)"
             required
             alertNote="Alerts at 9 months, 6 months, 3 months before expiry"
@@ -697,6 +722,8 @@ function DocumentsTab({
           />
 
           <ComplianceDocRow
+            docKey="car_insurance"
+            highlighted={focusDocType === "car_insurance"}
             label="Car Insurance"
             required
             alertNote="Alerts at 2 months, 1 month, 15 days before expiry"
@@ -728,6 +755,8 @@ function DocumentsTab({
 // ---------------------------------------------------------------------------
 
 interface ComplianceDocRowProps {
+  docKey: ComplianceKey;
+  highlighted?: boolean;
   label: string;
   required?: boolean;
   alertNote: string;
@@ -745,6 +774,8 @@ interface ComplianceDocRowProps {
 }
 
 function ComplianceDocRow({
+  docKey,
+  highlighted,
   label,
   required,
   alertNote,
@@ -765,8 +796,13 @@ function ComplianceDocRow({
 
   return (
     <div
+      id={`doc-row-${docKey}`}
       className={`rounded-lg border p-4 ${
-        hasAnyError ? "border-destructive/50 bg-destructive/5" : "border-border"
+        highlighted
+          ? "border-brand ring-2 ring-brand/30"
+          : hasAnyError
+          ? "border-destructive/50 bg-destructive/5"
+          : "border-border"
       }`}
     >
       {/* Header */}
@@ -924,6 +960,7 @@ const RELATIONSHIP_OPTIONS: { value: FamilyRelationship; label: string }[] = [
 function FamilyTab({
   familyType,
   familyMembers,
+  focusFamilyMemberId,
   onToggleType,
   onUpdate,
   familyBatakaFiles,
@@ -931,12 +968,25 @@ function FamilyTab({
 }: {
   familyType: "individual" | "family";
   familyMembers: FamilyMember[];
+  focusFamilyMemberId?: string;
   onToggleType: (t: "individual" | "family") => void;
   onUpdate: (members: FamilyMember[]) => void;
   familyBatakaFiles: Map<number, File>;
   onUpdateBatakaFile: (idx: number, file: File | null) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set([0]));
+
+  useEffect(() => {
+    if (!focusFamilyMemberId || !familyMembers.length) return;
+    const idx = familyMembers.findIndex((m) => m._id === focusFamilyMemberId);
+    if (idx >= 0) {
+      setExpanded(new Set([idx]));
+      const timer = window.setTimeout(() => {
+        document.getElementById(`family-member-${idx}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 150);
+      return () => window.clearTimeout(timer);
+    }
+  }, [focusFamilyMemberId, familyMembers]);
 
   function addMember() {
     const next = [...familyMembers, { name: "", relationship: "spouse" as FamilyRelationship }];
@@ -995,7 +1045,7 @@ function FamilyTab({
           {familyMembers.map((member, idx) => {
             const isOpen = expanded.has(idx);
             return (
-              <div key={idx} className="rounded-xl border border-border bg-card">
+              <div key={idx} id={`family-member-${idx}`} className="rounded-xl border border-border bg-card">
                 {/* Collapsible header */}
                 <div className="flex items-center justify-between px-4 py-3">
                   <button

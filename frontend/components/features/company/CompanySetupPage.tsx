@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Eye, FileText, Paperclip, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -193,11 +194,13 @@ function FileUploadField({
 
 const emptyBizForm = { type: "cr_certificate", customTypeName: "", startDate: "", expiryDate: "", notes: "" };
 
-function BusinessDocumentsPanel({ companyId, companyName, canEdit, onClose }: {
+function BusinessDocumentsPanel({ companyId, companyName, canEdit, onClose, initialDocumentId, onDeeplinkHandled }: {
   companyId: string;
   companyName: string;
   canEdit: boolean;
   onClose: () => void;
+  initialDocumentId?: string;
+  onDeeplinkHandled?: () => void;
 }) {
   const qc = useQueryClient();
   const [formOpen, setFormOpen] = useState(false);
@@ -276,6 +279,18 @@ function BusinessDocumentsPanel({ companyId, companyName, canEdit, onClose }: {
   }
 
   const docs = data?.data ?? [];
+  const openedDocRef = useRef(false);
+
+  // Open edit modal when navigated from dashboard expiry alert
+  useEffect(() => {
+    if (!initialDocumentId || !docs.length || openedDocRef.current) return;
+    const doc = docs.find((d) => d._id === initialDocumentId);
+    if (doc) {
+      openedDocRef.current = true;
+      openEdit(doc);
+      onDeeplinkHandled?.();
+    }
+  }, [initialDocumentId, docs, onDeeplinkHandled]);
 
   return (
     <>
@@ -453,6 +468,10 @@ const emptyCompanyForm = { name: "", code: "", email: "", phone: "", address: ""
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function CompanySetupPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const deepLinkHandled = useRef(false);
+
   const { can } = usePermissions();
   const qc = useQueryClient();
 
@@ -461,11 +480,37 @@ export function CompanySetupPage() {
   const [selected, setSelected] = useState<Company | null>(null);
   const [form, setForm] = useState(emptyCompanyForm);
   const [docsCompany, setDocsCompany] = useState<Company | null>(null);
+  const [deeplinkDocumentId, setDeeplinkDocumentId] = useState<string | undefined>();
 
   const { data, isLoading } = useQuery({
     queryKey: ["companies"],
     queryFn: () => companyApi.getAll(),
   });
+
+  function clearDeeplinkParams() {
+    router.replace("/settings/company");
+    setDeeplinkDocumentId(undefined);
+    deepLinkHandled.current = false;
+  }
+
+  // Open company documents drawer from dashboard expiry alert
+  useEffect(() => {
+    const companyId = searchParams.get("companyId");
+    const documentId = searchParams.get("documentId");
+    if (!companyId || !documentId || deepLinkHandled.current) return;
+    if (isLoading) return;
+
+    const company = data?.data?.find((c) => c._id === companyId);
+    if (!company) {
+      toast.error("Company not found");
+      clearDeeplinkParams();
+      return;
+    }
+
+    deepLinkHandled.current = true;
+    setDeeplinkDocumentId(documentId);
+    setDocsCompany(company);
+  }, [searchParams, data?.data, isLoading]);
 
   const saveMut = useMutation({
     mutationFn: () =>
@@ -607,7 +652,12 @@ export function CompanySetupPage() {
               companyId={docsCompany._id}
               companyName={docsCompany.name}
               canEdit={canEdit}
-              onClose={() => setDocsCompany(null)}
+              initialDocumentId={deeplinkDocumentId}
+              onDeeplinkHandled={clearDeeplinkParams}
+              onClose={() => {
+                setDocsCompany(null);
+                if (searchParams.get("companyId")) clearDeeplinkParams();
+              }}
             />
           </div>
         </div>

@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Eye, FileText, Paperclip, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -187,10 +188,12 @@ function FileUploadField({ file, existingUrl, existingName, onFileChange, onView
 
 const emptyDocForm = { type: "property_license", customTypeName: "", issuanceDate: "", expiryDate: "", notes: "" };
 
-function BranchDocumentsPanel({ branch, canEdit, onClose }: {
+function BranchDocumentsPanel({ branch, canEdit, onClose, initialDocumentId, onDeeplinkHandled }: {
   branch: Branch;
   canEdit: boolean;
   onClose: () => void;
+  initialDocumentId?: string;
+  onDeeplinkHandled?: () => void;
 }) {
   const qc = useQueryClient();
   const [formOpen, setFormOpen] = useState(false);
@@ -269,6 +272,17 @@ function BranchDocumentsPanel({ branch, canEdit, onClose }: {
   }
 
   const docs = data?.data ?? [];
+  const openedDocRef = useRef(false);
+
+  useEffect(() => {
+    if (!initialDocumentId || !docs.length || openedDocRef.current) return;
+    const doc = docs.find((d) => d._id === initialDocumentId);
+    if (doc) {
+      openedDocRef.current = true;
+      openEdit(doc);
+      onDeeplinkHandled?.();
+    }
+  }, [initialDocumentId, docs, onDeeplinkHandled]);
 
   return (
     <>
@@ -452,7 +466,36 @@ export function BranchesPageTemplate({
   deleteLoading,
   showEmptyBanner,
 }: BranchesPageTemplateProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const deepLinkHandled = useRef(false);
+
   const [docsBranch, setDocsBranch] = useState<Branch | null>(null);
+  const [deeplinkDocumentId, setDeeplinkDocumentId] = useState<string | undefined>();
+
+  function clearDeeplinkParams() {
+    router.replace("/settings/branches");
+    setDeeplinkDocumentId(undefined);
+    deepLinkHandled.current = false;
+  }
+
+  useEffect(() => {
+    const branchId = searchParams.get("branchId");
+    const documentId = searchParams.get("documentId");
+    if (!branchId || !documentId || deepLinkHandled.current) return;
+    if (isLoading) return;
+
+    const branch = data?.data?.find((b) => b._id === branchId);
+    if (!branch) {
+      toast.error("Branch not found");
+      clearDeeplinkParams();
+      return;
+    }
+
+    deepLinkHandled.current = true;
+    setDeeplinkDocumentId(documentId);
+    setDocsBranch(branch);
+  }, [searchParams, data?.data, isLoading]);
 
   const extendedColumns = [
     ...columns.filter((c) => c.key !== "actions"),
@@ -538,7 +581,12 @@ export function BranchesPageTemplate({
             <BranchDocumentsPanel
               branch={docsBranch}
               canEdit={canCreate}
-              onClose={() => setDocsBranch(null)}
+              initialDocumentId={deeplinkDocumentId}
+              onDeeplinkHandled={clearDeeplinkParams}
+              onClose={() => {
+                setDocsBranch(null);
+                if (searchParams.get("branchId")) clearDeeplinkParams();
+              }}
             />
           </div>
         </div>

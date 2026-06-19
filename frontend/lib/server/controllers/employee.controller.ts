@@ -422,6 +422,7 @@ export async function getExpiringDocuments(req: Request, res: Response) {
         alertLevel,
         isFamilyAlert: true,
         familyMemberName: member.name,
+        familyMemberId: member._id ? String(member._id) : undefined,
       }];
     });
 

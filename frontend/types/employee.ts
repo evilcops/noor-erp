@@ -147,4 +147,5 @@ export interface ExpiringDocumentAlert {
   alertLevel: "critical" | "warning" | "notice";
   isFamilyAlert?: boolean;
   familyMemberName?: string;
+  familyMemberId?: string;
 }

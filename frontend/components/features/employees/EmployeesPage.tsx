@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Download, Eye, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -18,7 +19,8 @@ import { EmployeeDetailsModal } from "@/components/features/employees/EmployeeDe
 import { useAuth, useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useEmployees, useEmployeeMutations } from "@/hooks/useEmployees";
-import type { ComplianceFiles, Employee } from "@/types/employee";
+import { employeeApi } from "@/lib/api/employees";
+import type { ComplianceDocType, ComplianceFiles, Employee } from "@/types/employee";
 import type { EmployeeFormValues } from "@/lib/validations/employee";
 
 const STATUS_FILTER = [
@@ -38,6 +40,10 @@ const TYPE_FILTER = [
 ];
 
 export function EmployeesPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const deepLinkHandled = useRef(false);
+
   const { user } = useAuth();
   const { branches, activeBranchId } = useBranch();
   const { can } = usePermissions();
@@ -54,6 +60,10 @@ export function EmployeesPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [selected, setSelected] = useState<Employee | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const [deeplinkTab, setDeeplinkTab] = useState<"personal" | "employment" | "status" | "documents" | "family" | undefined>();
+  const [deeplinkDocType, setDeeplinkDocType] = useState<ComplianceDocType | undefined>();
+  const [deeplinkFamilyMemberId, setDeeplinkFamilyMemberId] = useState<string | undefined>();
 
   const params = {
     page,
@@ -72,6 +82,51 @@ export function EmployeesPage() {
     () => Object.fromEntries(branches.map((b) => [b._id, b.name])),
     [branches]
   );
+
+  function clearDeeplinkParams() {
+    router.replace("/employees");
+    setDeeplinkTab(undefined);
+    setDeeplinkDocType(undefined);
+    setDeeplinkFamilyMemberId(undefined);
+    deepLinkHandled.current = false;
+  }
+
+  // Open employee edit from dashboard document expiry alert
+  useEffect(() => {
+    const employeeId = searchParams.get("employeeId");
+    const shouldEdit = searchParams.get("edit") === "1";
+    if (!employeeId || !shouldEdit || deepLinkHandled.current) return;
+
+    const fromList = data?.data?.find((e) => e._id === employeeId);
+    if (!fromList && isLoading) return;
+
+    deepLinkHandled.current = true;
+    const tab = searchParams.get("tab");
+    const docType = searchParams.get("docType");
+    const familyMemberId = searchParams.get("familyMemberId");
+
+    if (tab === "documents" || tab === "family" || tab === "personal" || tab === "employment" || tab === "status") {
+      setDeeplinkTab(tab);
+    }
+    if (docType) setDeeplinkDocType(docType as ComplianceDocType);
+    if (familyMemberId) setDeeplinkFamilyMemberId(familyMemberId);
+
+    if (fromList) {
+      setSelected(fromList);
+      setFormOpen(true);
+      return;
+    }
+
+    employeeApi.getById(employeeId)
+      .then((emp) => {
+        setSelected(emp);
+        setFormOpen(true);
+      })
+      .catch(() => {
+        toast.error("Employee not found");
+        clearDeeplinkParams();
+      });
+  }, [searchParams, data?.data, isLoading]);
 
   const columns: Column<Employee>[] = [
     { key: "id", header: "Employee ID", cell: (r) => <span className="font-mono text-xs">{r.employeeId}</span> },
@@ -296,8 +351,17 @@ export function EmployeesPage() {
 
       <EmployeeFormModal
         open={formOpen}
-        onOpenChange={(o) => { setFormOpen(o); if (!o) setSelected(null); }}
+        onOpenChange={(o) => {
+          setFormOpen(o);
+          if (!o) {
+            setSelected(null);
+            if (searchParams.get("employeeId")) clearDeeplinkParams();
+          }
+        }}
         employee={selected}
+        initialTab={deeplinkTab}
+        focusDocType={deeplinkDocType}
+        focusFamilyMemberId={deeplinkFamilyMemberId}
         onSubmit={handleSubmit}
         onUploadDocument={selected ? handleUpload : undefined}
         loading={create.isPending || update.isPending}

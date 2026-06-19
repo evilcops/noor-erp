@@ -149,11 +149,15 @@ export async function getExpiringBranchDocuments(req: Request, res: Response) {
       if (daysRemaining <= 15) alertLevel = "critical";
       else if (daysRemaining <= 30) alertLevel = "warning";
 
-      const branch = doc.branchId as unknown as { name: string; code: string } | null;
+      const branch = doc.branchId as unknown as { _id?: unknown; name?: string; code?: string } | null;
+      const branchId =
+        branch && typeof branch === "object" && branch._id != null
+          ? String(branch._id)
+          : String(doc.branchId);
 
       return {
         documentId: String(doc._id),
-        branchId: String(doc.branchId),
+        branchId,
         branchName: branch?.name ?? "Unknown branch",
         companyId: String(doc.companyId),
         type: doc.type,

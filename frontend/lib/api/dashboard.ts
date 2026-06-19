@@ -33,7 +33,7 @@ export const dashboardApi = {
   async getHrSummary(): Promise<DashboardData> {
     const [employees, todayAttendance, leaves, candidates, expiring, expiringBiz, expiringBranch] =
       await Promise.all([
-        employeeApi.getAll({ limit: 1 }),
+        employeeApi.getAll({ limit: 1, status: "active" }),
         attendanceApi.getToday().catch(() => [] as Awaited<ReturnType<typeof attendanceApi.getToday>>),
         leaveApi.list({ status: "pending", limit: 100 }).catch(() => ({ data: [] })),
         recruitmentApi.getCandidates({ limit: 100 }).catch(() => ({ data: [] })),
