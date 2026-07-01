@@ -14,6 +14,8 @@ export interface ILeaveBalance extends Document {
   sick: ILeaveBalanceBucket;
   emergency: ILeaveBalanceBucket;
   unpaid: ILeaveBalanceBucket;
+  maternity: ILeaveBalanceBucket;
+  paternity: ILeaveBalanceBucket;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -33,6 +35,8 @@ const leaveBalanceSchema = new Schema<ILeaveBalance>(
     sick: bucketSchema,
     emergency: bucketSchema,
     unpaid: bucketSchema,
+    maternity: bucketSchema,
+    paternity: bucketSchema,
   },
   { timestamps: true }
 );

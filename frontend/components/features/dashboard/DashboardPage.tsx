@@ -19,8 +19,12 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { Button } from "@/components/ui/Button";
+import {
+  DashboardPageGate,
+  DashboardSectionGate,
+} from "@/components/features/dashboard/DashboardSectionGate";
 import { usePermissions } from "@/hooks/usePermissions";
-import { dashboardApi } from "@/lib/api/dashboard";
+import { dashboardApi, type DashboardAccess } from "@/lib/api/dashboard";
 import type { ExpiringDocumentAlert } from "@/types/employee";
 import type { ExpiringBusinessDocAlert, ExpiringBranchDocAlert } from "@/types/documents";
 
@@ -117,11 +121,26 @@ function Sparkline({ points, color }: { points: number[]; color: string }) {
 // ─────────────────────────────────────────────────────────────────────────────
 export function DashboardPage() {
   const { can } = usePermissions();
+
+  const access: DashboardAccess = {
+    employee: can("employee:view"),
+    attendance: can("attendance:view"),
+    leave: can("leave:view"),
+    recruitment: can("recruitment:view"),
+    company: can("company:view"),
+    branch: can("branch:view"),
+  };
+
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["dashboard"],
-    queryFn: () => dashboardApi.getHrSummary(),
+    queryKey: ["dashboard", access],
+    queryFn: () => dashboardApi.getHrSummary(access),
     retry: 1,
+    enabled: can("dashboard:view"),
   });
+
+  if (!can("dashboard:view")) {
+    return <DashboardPageGate>{null}</DashboardPageGate>;
+  }
 
   if (isLoading) {
     return (
@@ -171,54 +190,68 @@ export function DashboardPage() {
 
       {/* ── Row 1: KPI stat cards ─────────────────────────────────────────── */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {/* Total Employees */}
-        <StatCard title="Active Employees" value={s.totalEmployees} sub="across all branches"
-          icon={Users} iconBg="bg-indigo-100 dark:bg-indigo-900/30" iconColor="text-indigo-600"
-          href="/employees" spark={sparkEmp} sparkColor="#6366f1" />
+        <DashboardSectionGate permission="employee:view" title="Active Employees">
+          <StatCard title="Active Employees" value={s.totalEmployees} sub="across all branches"
+            icon={Users} iconBg="bg-indigo-100 dark:bg-indigo-900/30" iconColor="text-indigo-600"
+            href="/employees" spark={sparkEmp} sparkColor="#6366f1" />
+        </DashboardSectionGate>
 
-        {/* Attendance donut */}
-        <div className="rounded-xl border border-border bg-card p-5">
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-sm font-medium text-muted-foreground">Attendance Today</p>
-            <Link href="/attendance"><span className="text-[10px] text-brand underline-offset-2 hover:underline">details →</span></Link>
-          </div>
-          <div className="flex items-center gap-4">
-            <MiniDonut pct={attendancePct} color="#10b981" />
-            <div className="space-y-0.5 text-sm">
-              <p><span className="font-semibold text-green-600">{s.presentToday}</span> <span className="text-muted-foreground">present</span></p>
-              <p><span className="font-semibold text-amber-600">{s.lateToday}</span> <span className="text-muted-foreground">late</span></p>
-              <p><span className="font-semibold text-slate-500">{absentToday}</span> <span className="text-muted-foreground">absent</span></p>
-              <p><span className="font-semibold text-blue-500">{s.onLeaveToday}</span> <span className="text-muted-foreground">on leave</span></p>
+        <DashboardSectionGate permission="attendance:view" title="Attendance Today">
+          <div className="rounded-xl border border-border bg-card p-5">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-medium text-muted-foreground">Attendance Today</p>
+              <Link href="/attendance"><span className="text-[10px] text-brand underline-offset-2 hover:underline">details →</span></Link>
+            </div>
+            <div className="flex items-center gap-4">
+              <MiniDonut pct={attendancePct} color="#10b981" />
+              <div className="space-y-0.5 text-sm">
+                <p><span className="font-semibold text-green-600">{s.presentToday}</span> <span className="text-muted-foreground">present</span></p>
+                <p><span className="font-semibold text-amber-600">{s.lateToday}</span> <span className="text-muted-foreground">late</span></p>
+                <p><span className="font-semibold text-slate-500">{absentToday}</span> <span className="text-muted-foreground">absent</span></p>
+                <p><span className="font-semibold text-blue-500">{s.onLeaveToday}</span> <span className="text-muted-foreground">on leave</span></p>
+              </div>
             </div>
           </div>
-        </div>
+        </DashboardSectionGate>
 
-        {/* Leave */}
-        <StatCard title="On Leave" value={s.onLeaveToday} sub={`${s.pendingLeaveRequests} requests pending`}
-          icon={Calendar} iconBg="bg-amber-100 dark:bg-amber-900/30" iconColor="text-amber-600"
-          href="/leave" spark={sparkLeave} sparkColor="#f59e0b" />
+        <DashboardSectionGate permission="leave:view" title="On Leave">
+          <StatCard title="On Leave" value={s.onLeaveToday} sub={`${s.pendingLeaveRequests} requests pending`}
+            icon={Calendar} iconBg="bg-amber-100 dark:bg-amber-900/30" iconColor="text-amber-600"
+            href="/leave" spark={sparkLeave} sparkColor="#f59e0b" />
+        </DashboardSectionGate>
 
-        {/* Document alerts summary */}
-        <div className="rounded-xl border border-border bg-card p-5">
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-sm font-medium text-muted-foreground">Document Alerts</p>
-            {totalAlerts > 0
-              ? <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-bold text-destructive">{totalAlerts} total</span>
-              : <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700 dark:bg-green-900/30 dark:text-green-400">All clear</span>
-            }
+        <DashboardSectionGate
+          anyOf={["employee:view", "company:view", "branch:view"]}
+          title="Document Alerts"
+          className="min-h-[180px]"
+        >
+          <div className="rounded-xl border border-border bg-card p-5">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-medium text-muted-foreground">Document Alerts</p>
+              {totalAlerts > 0
+                ? <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-bold text-destructive">{totalAlerts} total</span>
+                : <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700 dark:bg-green-900/30 dark:text-green-400">All clear</span>
+              }
+            </div>
+            <p className="mb-3 text-3xl font-bold text-warning">{totalAlerts}</p>
+            <div className="space-y-2">
+              {access.employee ? (
+                <AlertPill label="Employee Docs" count={empAlerts.length} color="text-destructive" />
+              ) : null}
+              {access.company ? (
+                <AlertPill label="Company Docs" count={bizAlerts.length} color="text-amber-600" />
+              ) : null}
+              {access.branch ? (
+                <AlertPill label="Branch Docs" count={branchAlerts.length} color="text-orange-500" />
+              ) : null}
+            </div>
           </div>
-          <p className="mb-3 text-3xl font-bold text-warning">{totalAlerts}</p>
-          <div className="space-y-2">
-            <AlertPill label="Employee Docs" count={empAlerts.length} color="text-destructive" />
-            <AlertPill label="Company Docs"  count={bizAlerts.length} color="text-amber-600" />
-            <AlertPill label="Branch Docs"   count={branchAlerts.length} color="text-orange-500" />
-          </div>
-        </div>
+        </DashboardSectionGate>
       </div>
 
       {/* ── Row 2: Recruitment pipeline + Quick actions ──────────────────── */}
       <div className="grid gap-4 lg:grid-cols-3">
-        {/* Recruitment pipeline */}
+        <DashboardSectionGate permission="recruitment:view" title="Recruitment Pipeline" className="col-span-2 min-h-[320px]">
         <section className="col-span-2 rounded-xl border border-border bg-card">
           <div className="flex items-center justify-between border-b border-border px-6 py-4">
             <h2 className="flex items-center gap-2 font-semibold">
@@ -311,10 +344,11 @@ export function DashboardPage() {
             )}
           </div>
         </section>
+        </DashboardSectionGate>
 
         {/* Right column: Attendance breakdown + Quick actions */}
         <div className="flex flex-col gap-4">
-          {/* Attendance card */}
+          <DashboardSectionGate permission="attendance:view" title="Attendance Breakdown">
           <section className="rounded-xl border border-border bg-card p-5">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="font-semibold">Attendance Breakdown</h2>
@@ -328,13 +362,21 @@ export function DashboardPage() {
               <AttStat label="On Leave" value={s.onLeaveToday}    color="text-blue-600"   bg="bg-blue-50 dark:bg-blue-950/20" />
             </div>
           </section>
+          </DashboardSectionGate>
 
-          {/* Quick actions */}
+          <DashboardSectionGate
+            anyOf={["attendance:view", "leave:view", "employee:create", "recruitment:edit"]}
+            title="Quick Actions"
+          >
           <section className="rounded-xl border border-border bg-card p-5">
             <h2 className="mb-3 font-semibold">Quick Actions</h2>
             <div className="flex flex-col gap-2">
-              <Link href="/attendance"><Button variant="secondary" className="w-full justify-start"><Clock className="mr-2 h-4 w-4" />Attendance</Button></Link>
-              <Link href="/leave"><Button variant="secondary" className="w-full justify-start"><Calendar className="mr-2 h-4 w-4" />Leave Requests</Button></Link>
+              {can("attendance:view") ? (
+                <Link href="/attendance"><Button variant="secondary" className="w-full justify-start"><Clock className="mr-2 h-4 w-4" />Attendance</Button></Link>
+              ) : null}
+              {can("leave:view") ? (
+                <Link href="/leave"><Button variant="secondary" className="w-full justify-start"><Calendar className="mr-2 h-4 w-4" />Leave Requests</Button></Link>
+              ) : null}
               {can("employee:create") && (
                 <Link href="/employees"><Button variant="secondary" className="w-full justify-start"><UserPlus className="mr-2 h-4 w-4" />Add Employee</Button></Link>
               )}
@@ -343,11 +385,13 @@ export function DashboardPage() {
               )}
             </div>
           </section>
+          </DashboardSectionGate>
         </div>
       </div>
 
       {/* ── Row 3: Three separate document expiry cards ───────────────────── */}
       <div className="grid gap-4 lg:grid-cols-3">
+        <DashboardSectionGate permission="employee:view" title="Employee Document Expiry">
         <ExpiryCard title="Employee Document Expiry" icon={FileWarning} iconColor="text-destructive"
           count={empAlerts.length} href="/employees" empty="All employee documents are valid.">
           {empAlerts.slice(0, 8).map((a, i) => (
@@ -364,7 +408,9 @@ export function DashboardPage() {
             </p>
           )}
         </ExpiryCard>
+        </DashboardSectionGate>
 
+        <DashboardSectionGate permission="company:view" title="Company Document Expiry">
         <ExpiryCard title="Company Document Expiry" icon={Building2} iconColor="text-amber-500"
           count={bizAlerts.length} href="/settings/company" empty="All company documents are valid.">
           {bizAlerts.map((a) => (
@@ -375,7 +421,9 @@ export function DashboardPage() {
               days={a.daysRemaining} />
           ))}
         </ExpiryCard>
+        </DashboardSectionGate>
 
+        <DashboardSectionGate permission="branch:view" title="Branch Document Expiry">
         <ExpiryCard title="Branch Document Expiry" icon={ShieldAlert} iconColor="text-orange-500"
           count={branchAlerts.length} href="/settings/branches" empty="All branch documents are valid.">
           {branchAlerts.map((a) => (
@@ -386,6 +434,7 @@ export function DashboardPage() {
               days={a.daysRemaining} />
           ))}
         </ExpiryCard>
+        </DashboardSectionGate>
       </div>
     </div>
   );

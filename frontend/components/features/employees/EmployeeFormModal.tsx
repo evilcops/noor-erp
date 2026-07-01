@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Eye, Plus, Trash2, Upload, User } from "lucide-react";
+import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle, CalendarDays, Eye, Plus, Trash2, Upload, User, UserCheck } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
@@ -11,7 +13,10 @@ import { Tabs } from "@/components/ui/Tabs";
 import { FileUpload } from "@/components/common/FileUpload";
 import { DocumentViewer } from "@/components/features/employees/DocumentViewer";
 import { useBranch } from "@/hooks";
+import { usePermissions } from "@/hooks/usePermissions";
+import { ROLE_LABELS } from "@/config/permissions";
 import { employeeFormSchema, type EmployeeFormValues } from "@/lib/validations/employee";
+import { employeeApi } from "@/lib/api/employees";
 import type {
   ComplianceDocInput,
   ComplianceDocType,
@@ -19,9 +24,11 @@ import type {
   ComplianceFiles,
   Employee,
   EmployeeDocument,
+  EmployeeLeaveBalance,
   FamilyMember,
   FamilyRelationship,
 } from "@/types/employee";
+import { DEFAULT_MATERNITY_LEAVE_DAYS, DEFAULT_PATERNITY_LEAVE_DAYS } from "@/lib/leave/constants";
 
 const DEPARTMENTS = ["HR", "IT", "Sales", "Operations", "Finance", "Marketing"];
 const EMPLOYMENT_TYPES = [
@@ -49,7 +56,7 @@ const COMPLIANCE_DOC_KEYS = [
 
 type ComplianceKey = (typeof COMPLIANCE_DOC_KEYS)[number];
 
-const PERSONAL_FIELDS = ["firstName", "lastName", "email"];
+const PERSONAL_FIELDS = ["firstName", "lastName", "email", "userPassword"];
 const EMPLOYMENT_FIELDS = ["branchId", "department", "designation", "joiningDate"];
 const STATUS_FIELDS = ["status"];
 const DOC_FIELDS = [
@@ -69,6 +76,53 @@ const DOC_FIELDS = [
   "car_insurance.expiryDate",
   "car_insurance.file",
 ];
+
+const LEAVE_BALANCE_FIELDS = [
+  "leaveBalance.year",
+  "leaveBalance.annualTotal",
+  "leaveBalance.sickTotal",
+  "leaveBalance.emergencyTotal",
+  "leaveBalance.unpaidTotal",
+  "leaveBalance.maternityTotal",
+  "leaveBalance.paternityTotal",
+];
+
+function defaultLeaveBalanceForm() {
+  return {
+    year: new Date().getFullYear(),
+    annualTotal: 30,
+    sickTotal: 14,
+    emergencyTotal: 5,
+    unpaidTotal: 0,
+    maternityTotal: DEFAULT_MATERNITY_LEAVE_DAYS,
+    paternityTotal: DEFAULT_PATERNITY_LEAVE_DAYS,
+  };
+}
+
+function leaveBalanceToForm(balance?: EmployeeLeaveBalance | null) {
+  if (!balance) return defaultLeaveBalanceForm();
+  return {
+    year: balance.year,
+    annualTotal: balance.annual.total,
+    sickTotal: balance.sick.total,
+    emergencyTotal: balance.emergency.total,
+    unpaidTotal: balance.unpaid.total,
+    maternityTotal: balance.maternity?.total ?? DEFAULT_MATERNITY_LEAVE_DAYS,
+    paternityTotal: balance.paternity?.total ?? DEFAULT_PATERNITY_LEAVE_DAYS,
+  };
+}
+
+function leaveBalanceUsedFromApi(balance?: EmployeeLeaveBalance | null) {
+  if (!balance) return undefined;
+  return {
+    annual: balance.annual.used,
+    sick: balance.sick.used,
+    emergency: balance.emergency.used,
+    unpaid: balance.unpaid.used,
+    maternity: balance.maternity?.used ?? 0,
+    paternity: balance.paternity?.used ?? 0,
+  };
+}
 
 function countErrors(errors: Record<string, string>, fields: string[]): number {
   return fields.filter((f) => errors[f]).length;
@@ -98,6 +152,10 @@ const EMPTY: EmployeeFormValues = {
   bataka: { issuanceDate: "", expiryDate: "" },
   mulkiya: { issuanceDate: "", expiryDate: "" },
   car_insurance: { issuanceDate: "", expiryDate: "" },
+  createUserAccount: false,
+  userPassword: "",
+  userRole: "employee",
+  leaveBalance: defaultLeaveBalanceForm(),
 };
 
 const EMPTY_FILES: ComplianceFiles = {};
@@ -106,7 +164,7 @@ interface EmployeeFormModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   employee?: Employee | null;
-  initialTab?: "personal" | "employment" | "status" | "documents" | "family";
+  initialTab?: "personal" | "employment" | "status" | "documents" | "family" | "leave-balance";
   focusDocType?: ComplianceDocType;
   focusFamilyMemberId?: string;
   onSubmit: (values: EmployeeFormValues, files: ComplianceFiles, extra?: { familyType?: "individual" | "family"; familyMembers?: FamilyMember[]; familyBatakaFiles?: Map<number, File> }) => Promise<void>;
@@ -126,6 +184,7 @@ export function EmployeeFormModal({
   loading,
 }: EmployeeFormModalProps) {
   const { branches } = useBranch();
+  const { can } = usePermissions();
   const [tab, setTab] = useState("personal");
   const [form, setForm] = useState<EmployeeFormValues>(EMPTY);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -135,6 +194,12 @@ export function EmployeeFormModal({
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [profilePicFile, setProfilePicFile] = useState<File | null>(null);
   const [familyBatakaFiles, setFamilyBatakaFiles] = useState<Map<number, File>>(new Map());
+
+  const { data: employeeDetail } = useQuery({
+    queryKey: ["employee-detail", employee?._id],
+    queryFn: () => employeeApi.getById(employee!._id),
+    enabled: !!employee?._id && open,
+  });
 
   useEffect(() => {
     if (employee) {
@@ -169,6 +234,11 @@ export function EmployeeFormModal({
         bataka: findDoc("bataka"),
         mulkiya: findDoc("mulkiya"),
         car_insurance: findDoc("car_insurance"),
+        createUserAccount: false,
+        userPassword: "",
+        userRole: "employee",
+        leaveBalance: leaveBalanceToForm(employee.leaveBalance),
+        leaveBalanceUsed: leaveBalanceUsedFromApi(employee.leaveBalance),
       });
     } else {
       setForm({ ...EMPTY, branchId: branches[0]?._id ?? "" });
@@ -181,6 +251,15 @@ export function EmployeeFormModal({
     setTab(initialTab ?? "personal");
     setErrors({});
   }, [employee, open, branches, initialTab]);
+
+  useEffect(() => {
+    if (!open || !employeeDetail?.leaveBalance) return;
+    setForm((prev) => ({
+      ...prev,
+      leaveBalance: leaveBalanceToForm(employeeDetail.leaveBalance),
+      leaveBalanceUsed: leaveBalanceUsedFromApi(employeeDetail.leaveBalance),
+    }));
+  }, [open, employeeDetail?.leaveBalance]);
 
   // Scroll to focused document row when opening from dashboard expiry alert
   useEffect(() => {
@@ -196,6 +275,21 @@ export function EmployeeFormModal({
     setErrors((prev) => {
       const next = { ...prev };
       delete next[key as string];
+      return next;
+    });
+  }
+
+  function updateLeaveBalanceField(
+    field: keyof EmployeeFormValues["leaveBalance"],
+    value: number
+  ) {
+    setForm((prev) => ({
+      ...prev,
+      leaveBalance: { ...prev.leaveBalance, [field]: value },
+    }));
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next[`leaveBalance.${field}`];
       return next;
     });
   }
@@ -274,6 +368,25 @@ export function EmployeeFormModal({
       }
     }
 
+    if (form.leaveBalanceUsed) {
+      const pairs = [
+        ["annual", "annualTotal", "Annual"] as const,
+        ["sick", "sickTotal", "Sick"] as const,
+        ["emergency", "emergencyTotal", "Emergency"] as const,
+        ["unpaid", "unpaidTotal", "Unpaid"] as const,
+        ["maternity", "maternityTotal", "Maternity"] as const,
+        ["paternity", "paternityTotal", "Paternity"] as const,
+      ];
+      for (const [usedKey, totalKey, label] of pairs) {
+        const used = form.leaveBalanceUsed[usedKey] ?? 0;
+        const total = Number(form.leaveBalance[totalKey]);
+        if (total < used) {
+          allErrors[`leaveBalance.${totalKey}`] =
+            `${label} total cannot be less than ${used} days already used`;
+        }
+      }
+    }
+
     if (Object.keys(allErrors).length > 0) {
       setErrors(allErrors);
       // Navigate to first tab that has errors
@@ -283,7 +396,9 @@ export function EmployeeFormModal({
         setTab("employment");
       } else if (STATUS_FIELDS.some((f) => allErrors[f])) {
         setTab("status");
-      } else {
+      } else if (LEAVE_BALANCE_FIELDS.some((f) => allErrors[f])) {
+        setTab("leave-balance");
+      } else if (DOC_FIELDS.some((f) => allErrors[f])) {
         setTab("documents");
       }
       return;
@@ -295,6 +410,7 @@ export function EmployeeFormModal({
   const personalErrorCount = countErrors(errors, PERSONAL_FIELDS);
   const employmentErrorCount = countErrors(errors, EMPLOYMENT_FIELDS);
   const statusErrorCount = countErrors(errors, STATUS_FIELDS);
+  const leaveBalanceErrorCount = countErrors(errors, LEAVE_BALANCE_FIELDS);
   const docErrorCount = countErrors(errors, DOC_FIELDS);
 
   return (
@@ -318,6 +434,7 @@ export function EmployeeFormModal({
         tabs={[
           { id: "personal", label: "Personal", errorCount: personalErrorCount },
           { id: "employment", label: "Employment", errorCount: employmentErrorCount },
+          { id: "leave-balance", label: "Leave Balance", errorCount: leaveBalanceErrorCount },
           { id: "status", label: "Status", errorCount: statusErrorCount },
           { id: "documents", label: "Documents", errorCount: docErrorCount },
           { id: "family", label: "Family" },
@@ -389,6 +506,98 @@ export function EmployeeFormModal({
               onChange={(e) => updateField("emergencyContactPhone", e.target.value)}
             />
           </div>
+
+          {employee?.userId ? (
+            <div className="sm:col-span-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+              <div className="flex items-start gap-3">
+                <UserCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+                <div>
+                  <p className="text-sm font-medium text-emerald-800 dark:text-emerald-300">
+                    System user account linked
+                  </p>
+                  <p className="mt-1 text-xs text-emerald-700 dark:text-emerald-400">
+                    This employee can sign in. Manage their role and permissions in{" "}
+                    {can("user:view") ? (
+                      <Link href="/settings/roles" className="font-medium underline underline-offset-2">
+                        Roles &amp; Permissions
+                      </Link>
+                    ) : (
+                      "Roles & Permissions"
+                    )}
+                    .
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : can("employee:create") || can("employee:edit") ? (
+            <div className="sm:col-span-2 rounded-lg border border-border bg-muted/20 p-4">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={form.createUserAccount ?? false}
+                  onChange={(e) =>
+                    updateField("createUserAccount", e.target.checked)
+                  }
+                  className="mt-1 h-4 w-4 rounded border-border accent-brand"
+                />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-foreground">
+                    Create system user account
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Allow this employee to sign in to NOOR ERP. You can set their permissions
+                    later in Roles &amp; Permissions.
+                  </p>
+                </div>
+              </label>
+
+              {form.createUserAccount ? (
+                <div className="mt-4 grid gap-4 sm:grid-cols-2 border-t border-border pt-4">
+                  <div>
+                    <Label>Login email</Label>
+                    <Input value={form.email} readOnly className="bg-muted" />
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Uses the employee email above
+                    </p>
+                  </div>
+                  <div>
+                    <Label>Password *</Label>
+                    <Input
+                      type="password"
+                      value={form.userPassword ?? ""}
+                      onChange={(e) => updateField("userPassword", e.target.value)}
+                      placeholder="Min. 8 characters"
+                      error={errors.userPassword}
+                    />
+                  </div>
+                  {can("user:edit") ? (
+                    <div className="sm:col-span-2">
+                      <Label>Initial role</Label>
+                      <Select
+                        value={form.userRole ?? "employee"}
+                        onChange={(e) =>
+                          updateField(
+                            "userRole",
+                            e.target.value as EmployeeFormValues["userRole"]
+                          )
+                        }
+                        options={[
+                          { value: "employee", label: ROLE_LABELS.employee },
+                          { value: "hr_manager", label: ROLE_LABELS.hr_manager },
+                          { value: "branch_manager", label: ROLE_LABELS.branch_manager },
+                          { value: "business_owner", label: ROLE_LABELS.business_owner },
+                        ]}
+                      />
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        Default is Employee. Adjust fine-grained permissions in Roles &amp;
+                        Permissions after creation.
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -496,6 +705,92 @@ export function EmployeeFormModal({
               rows={4}
               className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm"
             />
+          </div>
+        </div>
+      ) : null}
+
+      {/* ── Leave Balance ── */}
+      {tab === "leave-balance" ? (
+        <div className="space-y-5">
+          <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
+            <div className="flex items-start gap-3">
+              <CalendarDays className="mt-0.5 h-5 w-5 shrink-0 text-brand" />
+              <div>
+                <p className="text-sm font-medium text-foreground">Annual leave allocation</p>
+                <p className="text-xs text-muted-foreground">
+                  Set the total leave days for this employee. Used days are tracked automatically when
+                  leave is approved.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="max-w-xs">
+            <Label>Balance Year *</Label>
+            <Input
+              type="number"
+              min={2000}
+              max={2100}
+              value={form.leaveBalance.year}
+              onChange={(e) => updateLeaveBalanceField("year", Number(e.target.value))}
+              error={errors["leaveBalance.year"]}
+            />
+          </div>
+
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full min-w-[520px] text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
+                  <th className="px-4 py-3 font-medium">Leave Type</th>
+                  <th className="px-4 py-3 font-medium">Total Days *</th>
+                  {employee ? (
+                    <>
+                      <th className="px-4 py-3 font-medium">Used</th>
+                      <th className="px-4 py-3 font-medium">Remaining</th>
+                    </>
+                  ) : null}
+                </tr>
+              </thead>
+              <tbody>
+                {(
+                  [
+                    ["annual", "annualTotal", "Annual Leave"] as const,
+                    ["sick", "sickTotal", "Sick Leave"] as const,
+                    ["emergency", "emergencyTotal", "Emergency Leave"] as const,
+                    ["unpaid", "unpaidTotal", "Unpaid Leave"] as const,
+                    ["maternity", "maternityTotal", "Maternity Leave"] as const,
+                    ["paternity", "paternityTotal", "Paternity Leave"] as const,
+                  ] as const
+                ).map(([usedKey, totalKey, label]) => {
+                  const used = form.leaveBalanceUsed?.[usedKey] ?? 0;
+                  const total = Number(form.leaveBalance[totalKey]);
+                  const remaining = Math.max(0, total - used);
+                  return (
+                    <tr key={totalKey} className="border-b border-border last:border-0">
+                      <td className="px-4 py-3 font-medium text-foreground">{label}</td>
+                      <td className="px-4 py-3">
+                        <Input
+                          type="number"
+                          min={employee ? used : 0}
+                          value={form.leaveBalance[totalKey]}
+                          onChange={(e) =>
+                            updateLeaveBalanceField(totalKey, Number(e.target.value))
+                          }
+                          error={errors[`leaveBalance.${totalKey}`]}
+                          className="w-28"
+                        />
+                      </td>
+                      {employee ? (
+                        <>
+                          <td className="px-4 py-3 text-muted-foreground">{used}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{remaining}</td>
+                        </>
+                      ) : null}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       ) : null}
@@ -1237,5 +1532,21 @@ export function formToPayload(
     complianceDocs: hasAnyDoc ? complianceDocs : undefined,
     familyType: extra?.familyType,
     familyMembers: extra?.familyMembers,
+    ...(form.createUserAccount
+      ? {
+          createUserAccount: true,
+          userPassword: form.userPassword,
+          userRole: form.userRole ?? "employee",
+        }
+      : {}),
+    leaveBalance: {
+      year: Number(form.leaveBalance.year),
+      annual: { total: Number(form.leaveBalance.annualTotal) },
+      sick: { total: Number(form.leaveBalance.sickTotal) },
+      emergency: { total: Number(form.leaveBalance.emergencyTotal) },
+      unpaid: { total: Number(form.leaveBalance.unpaidTotal) },
+      maternity: { total: Number(form.leaveBalance.maternityTotal) },
+      paternity: { total: Number(form.leaveBalance.paternityTotal) },
+    },
   };
 }

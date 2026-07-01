@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ROLES } from "../config/constants";
 
 const complianceDocSchema = z.object({
   issuanceDate: z.string().optional(),
@@ -9,7 +10,6 @@ const complianceDocsSchema = z.object({
   passport: complianceDocSchema.optional(),
   driving_license: complianceDocSchema.optional(),
   bataka: complianceDocSchema.optional(),
-  /** Only required/relevant when hasVehicle is true — enforced at controller level */
   mulkiya: complianceDocSchema.optional().nullable(),
   car_insurance: complianceDocSchema.optional().nullable(),
 });
@@ -29,7 +29,31 @@ const familyMemberSchema = z.object({
   bataka: familyMemberBatakaSchema.optional(),
 });
 
-export const createEmployeeSchema = z.object({
+const userAccountRefine = (data: { createUserAccount?: boolean; userPassword?: string }, ctx: z.RefinementCtx) => {
+  if (data.createUserAccount && !data.userPassword) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["userPassword"],
+      message: "Password is required when creating a user account",
+    });
+  }
+};
+
+const leaveBalanceBucketSchema = z.object({
+  total: z.number().min(0, "Must be 0 or greater"),
+});
+
+const leaveBalanceSchema = z.object({
+  year: z.number().int().min(2000).max(2100).optional(),
+  annual: leaveBalanceBucketSchema,
+  sick: leaveBalanceBucketSchema,
+  emergency: leaveBalanceBucketSchema,
+  unpaid: leaveBalanceBucketSchema,
+  maternity: leaveBalanceBucketSchema,
+  paternity: leaveBalanceBucketSchema,
+});
+
+const employeeBodySchema = z.object({
   companyId: z.string().min(1),
   branchId: z.string().min(1),
   firstName: z.string().min(1),
@@ -55,13 +79,22 @@ export const createEmployeeSchema = z.object({
   complianceDocs: complianceDocsSchema.optional(),
   familyType: z.enum(["individual", "family"]).optional(),
   familyMembers: z.array(familyMemberSchema).optional(),
+  createUserAccount: z.boolean().optional(),
+  userPassword: z.string().min(8).optional(),
+  userRole: z.enum(ROLES).optional(),
+  leaveBalance: leaveBalanceSchema,
 });
 
-export const updateEmployeeSchema = createEmployeeSchema
+const employeeUpdateBodySchema = employeeBodySchema
   .partial()
   .omit({ companyId: true, branchId: true })
   .extend({
     status: z
       .enum(["active", "on_leave", "suspended", "resigned", "terminated", "archived"])
       .optional(),
+    leaveBalance: leaveBalanceSchema.optional(),
   });
+
+export const createEmployeeSchema = employeeBodySchema.superRefine(userAccountRefine);
+
+export const updateEmployeeSchema = employeeUpdateBodySchema.superRefine(userAccountRefine);

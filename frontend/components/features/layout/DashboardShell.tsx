@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { RoutePermissionGuard } from "@/components/common/RoutePermissionGuard";
 import { Header } from "@/components/features/layout/Header";
 import { MobileSidebar } from "@/components/features/layout/MobileSidebar";
 import { Sidebar } from "@/components/features/layout/Sidebar";
@@ -26,7 +27,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         />
 
         <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
-          {children}
+          <RoutePermissionGuard>{children}</RoutePermissionGuard>
         </main>
 
         <footer className="border-t border-border bg-card px-6 py-3">

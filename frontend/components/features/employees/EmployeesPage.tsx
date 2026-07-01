@@ -224,6 +224,7 @@ export function EmployeesPage() {
     }
     const payload = formToPayload(form, companyId, extra);
     const fbFiles = extra?.familyBatakaFiles;
+    const createdUserAccount = form.createUserAccount && form.userPassword;
     if (selected && formOpen) {
       const updated = await update.mutateAsync({ id: selected._id, data: payload });
       if (Object.keys(files).length) {
@@ -232,6 +233,9 @@ export function EmployeesPage() {
       if (fbFiles?.size && updated?.familyMembers?.length) {
         await uploadFamilyBatakaFiles(selected._id, updated.familyMembers, fbFiles);
       }
+      if (createdUserAccount) {
+        toast.success("User account created. Manage permissions in Settings → Roles & Permissions.");
+      }
     } else {
       const created = await create.mutateAsync(payload);
       if (Object.keys(files).length && created?._id) {
@@ -239,6 +243,9 @@ export function EmployeesPage() {
       }
       if (fbFiles?.size && created?._id && created?.familyMembers?.length) {
         await uploadFamilyBatakaFiles(created._id, created.familyMembers, fbFiles);
+      }
+      if (createdUserAccount) {
+        toast.success("Employee and user account created. Set permissions in Settings → Roles & Permissions.");
       }
     }
     setFormOpen(false);

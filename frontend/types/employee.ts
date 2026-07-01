@@ -37,6 +37,32 @@ export interface EmployeeDocument {
   uploadedAt?: string;
 }
 
+export interface EmployeeLeaveBalanceBucket {
+  total: number;
+  used: number;
+  remaining: number;
+}
+
+export interface EmployeeLeaveBalance {
+  year: number;
+  annual: EmployeeLeaveBalanceBucket;
+  sick: EmployeeLeaveBalanceBucket;
+  emergency: EmployeeLeaveBalanceBucket;
+  unpaid: EmployeeLeaveBalanceBucket;
+  maternity: EmployeeLeaveBalanceBucket;
+  paternity: EmployeeLeaveBalanceBucket;
+}
+
+export interface EmployeeLeaveBalanceInput {
+  year?: number;
+  annual: { total: number };
+  sick: { total: number };
+  emergency: { total: number };
+  unpaid: { total: number };
+  maternity: { total: number };
+  paternity: { total: number };
+}
+
 export interface Employee {
   _id: string;
   employeeId: string;
@@ -60,10 +86,12 @@ export interface Employee {
   contractEndDate?: string;
   status: EmployeeStatus;
   profilePicture?: string;
+  userId?: string;
   hasVehicle?: boolean;
   familyType?: "individual" | "family";
   familyMembers?: FamilyMember[];
   documents: EmployeeDocument[];
+  leaveBalance?: EmployeeLeaveBalance | null;
   notes?: string;
   createdBy?: string;
   updatedBy?: string;
@@ -116,9 +144,15 @@ export interface CreateEmployeeInput {
   status?: EmployeeStatus;
   hasVehicle?: boolean;
   complianceDocs?: ComplianceDocs;
+  createUserAccount?: boolean;
+  userPassword?: string;
+  userRole?: "super_admin" | "business_owner" | "branch_manager" | "hr_manager" | "employee";
+  leaveBalance: EmployeeLeaveBalanceInput;
 }
 
-export type UpdateEmployeeInput = Partial<Omit<CreateEmployeeInput, "companyId" | "branchId">>;
+export type UpdateEmployeeInput = Partial<Omit<CreateEmployeeInput, "companyId" | "branchId" | "leaveBalance">> & {
+  leaveBalance?: EmployeeLeaveBalanceInput;
+};
 
 export type FamilyRelationship = "spouse" | "son" | "daughter" | "parents";
 

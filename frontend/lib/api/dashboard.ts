@@ -16,6 +16,15 @@ export interface HrSummary {
   pendingLeaveRequests: number;
 }
 
+export interface DashboardAccess {
+  employee: boolean;
+  attendance: boolean;
+  leave: boolean;
+  recruitment: boolean;
+  company: boolean;
+  branch: boolean;
+}
+
 export interface DashboardData {
   summary: HrSummary;
   recruitmentByStatus: Record<string, number>;
@@ -30,56 +39,82 @@ export interface DashboardData {
 }
 
 export const dashboardApi = {
-  async getHrSummary(): Promise<DashboardData> {
+  async getHrSummary(access: DashboardAccess): Promise<DashboardData> {
+    const needsAttendance = access.attendance || access.leave;
     const [employees, todayAttendance, leaves, candidates, expiring, expiringBiz, expiringBranch] =
       await Promise.all([
-        employeeApi.getAll({ limit: 1, status: "active" }),
-        attendanceApi.getToday().catch(() => [] as Awaited<ReturnType<typeof attendanceApi.getToday>>),
-        leaveApi.list({ status: "pending", limit: 100 }).catch(() => ({ data: [] })),
-        recruitmentApi.getCandidates({ limit: 100 }).catch(() => ({ data: [] })),
-        // 274 days = passport 9-month window
-        employeeApi.getExpiringDocuments(274).catch(() => []),
-        businessDocApi.getExpiring().catch(() => [] as ExpiringBusinessDocAlert[]),
-        branchDocApi.getExpiring().catch(() => [] as ExpiringBranchDocAlert[]),
+        access.employee
+          ? employeeApi.getAll({ limit: 1, status: "active" })
+          : Promise.resolve({ data: [], meta: { total: 0 } }),
+        access.attendance
+          ? attendanceApi.getToday().catch(() => [] as Awaited<ReturnType<typeof attendanceApi.getToday>>)
+          : Promise.resolve([]),
+        access.leave
+          ? leaveApi.list({ status: "pending", limit: 100 }).catch(() => ({ data: [] }))
+          : Promise.resolve({ data: [] }),
+        access.recruitment
+          ? recruitmentApi.getCandidates({ limit: 100 }).catch(() => ({ data: [] }))
+          : Promise.resolve({ data: [] }),
+        access.employee
+          ? employeeApi.getExpiringDocuments(274).catch(() => [])
+          : Promise.resolve([]),
+        access.company
+          ? businessDocApi.getExpiring().catch(() => [] as ExpiringBusinessDocAlert[])
+          : Promise.resolve([]),
+        access.branch
+          ? branchDocApi.getExpiring().catch(() => [] as ExpiringBranchDocAlert[])
+          : Promise.resolve([]),
       ]);
 
-    const presentToday = todayAttendance.filter((a) => a.timeIn).length;
-    const lateToday = todayAttendance.filter((a) => a.isLate).length;
-    const onLeaveToday = todayAttendance.filter((a) => a.status === "on_leave").length;
+    const presentToday = access.attendance
+      ? todayAttendance.filter((a) => a.timeIn).length
+      : 0;
+    const lateToday = access.attendance
+      ? todayAttendance.filter((a) => a.isLate).length
+      : 0;
+    const onLeaveToday = access.attendance
+      ? todayAttendance.filter((a) => a.status === "on_leave").length
+      : 0;
 
     const recruitmentByStatus: Record<string, number> = {};
-    candidates.data.forEach((c) => {
-      recruitmentByStatus[c.status] = (recruitmentByStatus[c.status] ?? 0) + 1;
-    });
+    if (access.recruitment) {
+      candidates.data.forEach((c) => {
+        recruitmentByStatus[c.status] = (recruitmentByStatus[c.status] ?? 0) + 1;
+      });
+    }
 
-    const pendingInterviews = candidates.data.filter(
-      (c) => c.status === "interview_scheduled"
-    ).length;
+    const pendingInterviews = access.recruitment
+      ? candidates.data.filter((c) => c.status === "interview_scheduled").length
+      : 0;
 
-    const alerts = Array.isArray(expiring) ? (expiring as ExpiringDocumentAlert[]) : [];
+    const alerts = access.employee && Array.isArray(expiring) ? (expiring as ExpiringDocumentAlert[]) : [];
+    const bizAlerts = access.company && Array.isArray(expiringBiz) ? (expiringBiz as ExpiringBusinessDocAlert[]) : [];
+    const branchAlerts = access.branch && Array.isArray(expiringBranch) ? (expiringBranch as ExpiringBranchDocAlert[]) : [];
 
     return {
       summary: {
-        totalEmployees: employees.meta?.total ?? 0,
+        totalEmployees: access.employee ? (employees.meta?.total ?? 0) : 0,
         presentToday,
         onLeaveToday,
         lateToday,
-        pendingLeaveRequests: leaves.data?.length ?? 0,
+        pendingLeaveRequests: access.leave ? (leaves.data?.length ?? 0) : 0,
       },
       recruitmentByStatus,
-      recentCandidates: candidates.data.slice(0, 5).map((c) => ({
-        _id: c._id,
-        candidateName: c.candidateName,
-        position: c.position,
-        status: c.status,
-        createdAt: c.createdAt,
-      })),
+      recentCandidates: access.recruitment
+        ? candidates.data.slice(0, 5).map((c) => ({
+            _id: c._id,
+            candidateName: c.candidateName,
+            position: c.position,
+            status: c.status,
+            createdAt: c.createdAt,
+          }))
+        : [],
       pendingInterviews,
       upcomingHolidays: [],
-      expiringDocuments: alerts.length + (Array.isArray(expiringBiz) ? expiringBiz.length : 0) + (Array.isArray(expiringBranch) ? expiringBranch.length : 0),
+      expiringDocuments: alerts.length + bizAlerts.length + branchAlerts.length,
       expiringDocumentAlerts: alerts,
-      expiringBusinessDocAlerts: Array.isArray(expiringBiz) ? expiringBiz as ExpiringBusinessDocAlert[] : [],
-      expiringBranchDocAlerts: Array.isArray(expiringBranch) ? expiringBranch as ExpiringBranchDocAlert[] : [],
+      expiringBusinessDocAlerts: bizAlerts,
+      expiringBranchDocAlerts: branchAlerts,
       reviewsDue: 0,
     };
   },

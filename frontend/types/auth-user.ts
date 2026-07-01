@@ -5,6 +5,30 @@ export type UserRole =
   | "hr_manager"
   | "employee";
 
+export type Resource =
+  | "dashboard"
+  | "company"
+  | "branch"
+  | "employee"
+  | "attendance"
+  | "leave"
+  | "recruitment"
+  | "performance"
+  | "notification"
+  | "report"
+  | "audit"
+  | "user";
+
+export type Action =
+  | "view"
+  | "create"
+  | "edit"
+  | "delete"
+  | "approve"
+  | "export"
+  | "assign"
+  | "archive";
+
 export interface ApiUser {
   id: string;
   email: string;
@@ -19,6 +43,7 @@ export interface ApiUser {
   isActive: boolean;
   lastLogin?: string;
   permissions?: string[];
+  useCustomPermissions?: boolean;
 }
 
 export interface LoginResult {

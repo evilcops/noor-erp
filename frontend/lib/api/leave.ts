@@ -18,6 +18,8 @@ export interface LeaveBalance {
   sick: { total: number; used: number; remaining: number };
   emergency: { total: number; used: number; remaining: number };
   unpaid: { total: number; used: number; remaining: number };
+  maternity: { total: number; used: number; remaining: number };
+  paternity: { total: number; used: number; remaining: number };
 }
 
 export interface LeaveInput {
@@ -56,6 +58,9 @@ export const leaveApi = {
   delete: (id: string) =>
     apiRequest<{ message: string }>(`/leaves/${id}`, { method: "DELETE" }),
 
+  cancel: (id: string) =>
+    apiRequest<{ message: string }>(`/leaves/${id}/cancel`, { method: "POST" }),
+
   getCalendar: (params: { branchId?: string; employeeId?: string; fromDate?: string; toDate?: string } = {}) =>
     apiRequest<LeaveRequest[]>(`/leaves/calendar${buildQuery(params)}`),
 
@@ -66,5 +71,11 @@ export const leaveApi = {
     apiRequest<LeaveRequest>(`/leaves/${id}/reject`, {
       method: "PUT",
       body: JSON.stringify({ rejectionReason }),
+    }),
+
+  uploadAttachment: (formData: FormData) =>
+    apiRequest<{ attachmentUrl: string }>("/leaves/attachment", {
+      method: "POST",
+      body: formData,
     }),
 };

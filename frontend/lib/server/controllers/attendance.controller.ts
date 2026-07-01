@@ -10,6 +10,7 @@ import {
 } from "../services/attendance.service";
 import {
   assertBranchAccess,
+  applyEmployeeSelfScope,
   buildTenantFilter,
 } from "../services/permission.service";
 import { buildMeta, parsePagination, sendSuccess } from "../utils/apiResponse";
@@ -40,7 +41,11 @@ function resolveTargetEmployeeId(req: Request): string {
 function buildAttendanceFilter(req: Request) {
   const filter: Record<string, unknown> = { ...buildTenantFilter(req.user!), deletedAt: null };
   if (req.query.branchId) filter.branchId = req.query.branchId;
-  if (req.query.employeeId) filter.employeeId = req.query.employeeId;
+  applyEmployeeSelfScope(
+    req.user!,
+    filter,
+    req.query.employeeId ? String(req.query.employeeId) : undefined
+  );
   if (req.query.status) filter.status = req.query.status;
   if (req.query.fromDate || req.query.toDate) {
     filter.date = {};
@@ -323,6 +328,12 @@ export async function getTeamAttendance(req: Request, res: Response) {
 export async function requestCorrection(req: Request, res: Response) {
   const record = await Attendance.findOne({ _id: req.body.attendanceId, deletedAt: null });
   if (!record) throw new AppError("NOT_FOUND", "Attendance record not found", 404);
+
+  if (req.user!.role === "employee") {
+    if (!req.user!.employeeId || String(record.employeeId) !== String(req.user!.employeeId)) {
+      throw new AppError("FORBIDDEN", "You can only request corrections for your own attendance", 403);
+    }
+  }
 
   req.auditMeta = { oldValue: record.toObject() };
 

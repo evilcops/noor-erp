@@ -1,12 +1,21 @@
 import type { Request, Response } from "express";
+import fs from "fs";
+import path from "path";
 import { Leave } from "../models/Leave.model";
 import { LeaveBalance } from "../models/LeaveBalance.model";
 import { Employee } from "../models/Employee.model";
 import { isHrRole } from "../services/attendance.service";
 import { createNotification } from "../services/notification.service";
 import {
+  formatLeaveBalance,
+  getLeaveBalanceForEmployee,
+  syncLeaveBalanceForStatusChange,
+} from "../services/leave-balance.service";
+import {
   assertBranchAccess,
+  applyEmployeeSelfScope,
   buildTenantFilter,
+  resolveEmployeeIdForQuery,
 } from "../services/permission.service";
 import {
   buildMeta,
@@ -15,6 +24,9 @@ import {
   sendSuccess,
 } from "../utils/apiResponse";
 import { AppError } from "../utils/AppError";
+import { DEFAULT_MATERNITY_LEAVE_DAYS, DEFAULT_PATERNITY_LEAVE_DAYS, LEAVE_TYPES_REQUIRING_DOCUMENT } from "../../../lib/leave/constants";
+
+const UPLOAD_DIR = path.join(process.cwd(), ".data", "uploads");
 
 function daysBetween(start: Date, end: Date) {
   return Math.ceil((end.getTime() - start.getTime()) / 86400000) + 1;
@@ -102,7 +114,11 @@ export async function listLeaves(req: Request, res: Response) {
   const filter: Record<string, unknown> = { ...buildTenantFilter(req.user!), deletedAt: null };
   if (req.query.status) filter.status = req.query.status;
   if (req.query.branchId) filter.branchId = req.query.branchId;
-  if (req.query.employeeId) filter.employeeId = req.query.employeeId;
+  applyEmployeeSelfScope(
+    req.user!,
+    filter,
+    req.query.employeeId ? String(req.query.employeeId) : undefined
+  );
   applyLeaveDateFilter(
     filter,
     req.query.fromDate ? String(req.query.fromDate) : undefined,
@@ -138,9 +154,15 @@ export async function updateLeave(req: Request, res: Response) {
   assertBranchAccess(req.user!, leave.branchId, leave.companyId);
   req.auditMeta = { oldValue: leave.toObject() };
 
+  const previousStatus = leave.status;
+  let nextStatus = leave.status;
+
   if (req.body.type) leave.type = req.body.type;
   if (req.body.reason !== undefined) leave.reason = req.body.reason;
-  if (req.body.status) leave.status = req.body.status;
+  if (req.body.status) {
+    leave.status = req.body.status;
+    nextStatus = req.body.status;
+  }
   if (req.body.attachmentUrl !== undefined) leave.attachmentUrl = req.body.attachmentUrl;
 
   if (req.body.startDate || req.body.endDate) {
@@ -149,6 +171,10 @@ export async function updateLeave(req: Request, res: Response) {
     leave.startDate = startDate;
     leave.endDate = endDate;
     leave.totalDays = daysBetween(startDate, endDate);
+  }
+
+  if (previousStatus !== nextStatus) {
+    await syncLeaveBalanceForStatusChange(leave, previousStatus, nextStatus);
   }
 
   leave.updatedBy = req.user!._id;
@@ -168,6 +194,32 @@ export async function deleteLeave(req: Request, res: Response) {
   assertBranchAccess(req.user!, leave.branchId, leave.companyId);
   req.auditMeta = { oldValue: leave.toObject() };
 
+  const previousStatus = leave.status;
+  if (previousStatus === "approved") {
+    await syncLeaveBalanceForStatusChange(leave, previousStatus, "cancelled");
+  }
+
+  leave.status = "cancelled";
+  leave.deletedAt = new Date();
+  leave.updatedBy = req.user!._id;
+  await leave.save();
+
+  return sendSuccess(res, { message: "Leave request cancelled" });
+}
+
+export async function cancelOwnLeave(req: Request, res: Response) {
+  const leave = await Leave.findOne({ _id: req.params.id, deletedAt: null });
+  if (!leave) throw new AppError("NOT_FOUND", "Leave not found", 404);
+
+  if (!req.user!.employeeId || String(leave.employeeId) !== String(req.user!.employeeId)) {
+    throw new AppError("FORBIDDEN", "You can only cancel your own leave requests", 403);
+  }
+  if (leave.status !== "pending") {
+    throw new AppError("BAD_REQUEST", "Only pending leave requests can be cancelled", 400);
+  }
+
+  req.auditMeta = { oldValue: leave.toObject() };
+
   leave.status = "cancelled";
   leave.deletedAt = new Date();
   leave.updatedBy = req.user!._id;
@@ -180,7 +232,25 @@ export async function approveLeave(req: Request, res: Response) {
   const leave = await Leave.findOne({ _id: req.params.id, deletedAt: null });
   if (!leave) throw new AppError("NOT_FOUND", "Leave not found", 404);
 
+  if (leave.status !== "pending") {
+    throw new AppError("BAD_REQUEST", "Only pending leave requests can be approved", 400);
+  }
+
+  if (
+    (LEAVE_TYPES_REQUIRING_DOCUMENT as readonly string[]).includes(leave.type) &&
+    !leave.attachmentUrl
+  ) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "Cannot approve leave without a supporting document",
+      400
+    );
+  }
+
+  assertBranchAccess(req.user!, leave.branchId, leave.companyId);
   req.auditMeta = { oldValue: leave.toObject() };
+
+  await syncLeaveBalanceForStatusChange(leave, leave.status, "approved");
 
   leave.status = "approved";
   leave.approvedBy = req.user!._id;
@@ -223,13 +293,15 @@ export async function rejectLeave(req: Request, res: Response) {
 }
 
 export async function getLeaveBalance(req: Request, res: Response) {
-  const employeeId = req.query.employeeId ?? req.user!.employeeId;
-  if (!employeeId) throw new AppError("BAD_REQUEST", "Employee ID required", 400);
+  const employeeId = resolveEmployeeIdForQuery(
+    req.user!,
+    req.query.employeeId ? String(req.query.employeeId) : undefined
+  );
 
-  const employee = await getEmployeeById(req, String(employeeId));
+  const employee = await getEmployeeById(req, employeeId);
 
   const year = parseInt(String(req.query.year ?? new Date().getFullYear()), 10);
-  let balance = await LeaveBalance.findOne({ employeeId: employee._id, year });
+  let balance = await getLeaveBalanceForEmployee(employee._id, year);
 
   if (!balance) {
     balance = await LeaveBalance.create({
@@ -240,10 +312,12 @@ export async function getLeaveBalance(req: Request, res: Response) {
       sick: { total: 14, used: 0, remaining: 14 },
       emergency: { total: 5, used: 0, remaining: 5 },
       unpaid: { total: 0, used: 0, remaining: 0 },
+      maternity: { total: DEFAULT_MATERNITY_LEAVE_DAYS, used: 0, remaining: DEFAULT_MATERNITY_LEAVE_DAYS },
+      paternity: { total: DEFAULT_PATERNITY_LEAVE_DAYS, used: 0, remaining: DEFAULT_PATERNITY_LEAVE_DAYS },
     });
   }
 
-  return sendSuccess(res, balance);
+  return sendSuccess(res, formatLeaveBalance(balance));
 }
 
 export async function getLeaveCalendar(req: Request, res: Response) {
@@ -253,7 +327,11 @@ export async function getLeaveCalendar(req: Request, res: Response) {
     deletedAt: null,
   };
   if (req.query.branchId) filter.branchId = req.query.branchId;
-  if (req.query.employeeId) filter.employeeId = req.query.employeeId;
+  applyEmployeeSelfScope(
+    req.user!,
+    filter,
+    req.query.employeeId ? String(req.query.employeeId) : undefined
+  );
   applyLeaveDateFilter(
     filter,
     req.query.fromDate ? String(req.query.fromDate) : undefined,
@@ -264,4 +342,21 @@ export async function getLeaveCalendar(req: Request, res: Response) {
     .populate("employeeId", "firstName lastName employeeId")
     .lean();
   return sendSuccess(res, leaves);
+}
+
+export async function uploadLeaveAttachment(req: Request, res: Response) {
+  if (!req.file) throw new AppError("VALIDATION_ERROR", "File required", 400);
+
+  let ownerId = req.user!.employeeId ? String(req.user!.employeeId) : "leave";
+  if (req.body.employeeId && isHrRole(req.user!.role)) {
+    const employee = await getEmployeeById(req, String(req.body.employeeId));
+    ownerId = String(employee._id);
+  }
+
+  await fs.promises.mkdir(UPLOAD_DIR, { recursive: true });
+  const ext = path.extname(req.file.originalname) || ".bin";
+  const safeName = `${Date.now()}-leave-${ownerId}${ext}`;
+  await fs.promises.writeFile(path.join(UPLOAD_DIR, safeName), req.file.buffer);
+
+  return sendSuccess(res, { attachmentUrl: `/api/uploads/${safeName}` });
 }

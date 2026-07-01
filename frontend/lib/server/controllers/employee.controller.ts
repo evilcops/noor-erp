@@ -4,6 +4,14 @@ import type { Request, Response } from "express";
 import { Employee } from "../models/Employee.model";
 import type { ComplianceDocType } from "../models/Employee.model";
 import { generateEmployeeId } from "../services/auth.service";
+import { createUserForEmployee } from "../services/employee-user.service";
+import {
+  createLeaveBalanceForEmployee,
+  formatLeaveBalance,
+  getLeaveBalanceForEmployee,
+  upsertLeaveBalanceForEmployee,
+  type LeaveBalanceInput,
+} from "../services/leave-balance.service";
 import {
   assertBranchAccess,
   assertCompanyAccess,
@@ -73,9 +81,21 @@ export async function createEmployee(req: Request, res: Response) {
   assertCompanyAccess(req.user!, req.body.companyId);
   assertBranchAccess(req.user!, req.body.branchId, req.body.companyId);
 
-  const { complianceDocs, hasVehicle, ...rest } = req.body as {
+  const {
+    complianceDocs,
+    hasVehicle,
+    createUserAccount,
+    userPassword,
+    userRole,
+    leaveBalance,
+    ...rest
+  } = req.body as {
     complianceDocs?: Record<string, ComplianceDocInput>;
     hasVehicle?: boolean;
+    createUserAccount?: boolean;
+    userPassword?: string;
+    userRole?: import("../config/constants").UserRole;
+    leaveBalance?: LeaveBalanceInput;
     [key: string]: unknown;
   };
 
@@ -101,7 +121,23 @@ export async function createEmployee(req: Request, res: Response) {
     createdBy: req.user!._id,
     updatedBy: req.user!._id,
   });
-  return sendSuccess(res, employee, 201);
+
+  if (createUserAccount && userPassword) {
+    await createUserForEmployee(req.user!, employee, {
+      password: userPassword,
+      role: userRole,
+    });
+    await employee.populate("userId");
+  }
+
+  if (!leaveBalance) {
+    throw new AppError("BAD_REQUEST", "Leave balance is required", 400);
+  }
+  await createLeaveBalanceForEmployee(employee._id, employee.companyId, leaveBalance);
+
+  const balance = await getLeaveBalanceForEmployee(employee._id);
+  const payload = employee.toObject();
+  return sendSuccess(res, { ...payload, leaveBalance: balance ? formatLeaveBalance(balance) : null }, 201);
 }
 
 export async function listEmployees(req: Request, res: Response) {
@@ -130,7 +166,13 @@ export async function getEmployee(req: Request, res: Response) {
   const employee = await Employee.findById(req.params.id);
   if (!employee) throw new AppError("NOT_FOUND", "Employee not found", 404);
   assertBranchAccess(req.user!, employee.branchId, employee.companyId);
-  return sendSuccess(res, employee);
+
+  const balance = await getLeaveBalanceForEmployee(employee._id);
+  const payload = employee.toObject();
+  return sendSuccess(res, {
+    ...payload,
+    leaveBalance: balance ? formatLeaveBalance(balance) : null,
+  });
 }
 
 export async function updateEmployee(req: Request, res: Response) {
@@ -143,7 +185,17 @@ export async function updateEmployee(req: Request, res: Response) {
     oldValue: employee.toObject() as unknown as Record<string, unknown>,
   };
 
-  const { complianceDocs, hasVehicle, familyType, familyMembers, ...rest } = req.body as {
+  const {
+    complianceDocs,
+    hasVehicle,
+    familyType,
+    familyMembers,
+    createUserAccount,
+    userPassword,
+    userRole,
+    leaveBalance,
+    ...rest
+  } = req.body as {
     complianceDocs?: Record<string, ComplianceDocInput>;
     hasVehicle?: boolean;
     familyType?: "individual" | "family";
@@ -154,6 +206,10 @@ export async function updateEmployee(req: Request, res: Response) {
       profilePicture?: string;
       bataka?: { issueDate?: string; expiryDate?: string; fileUrl?: string; status?: string };
     }>;
+    createUserAccount?: boolean;
+    userPassword?: string;
+    userRole?: import("../config/constants").UserRole;
+    leaveBalance?: LeaveBalanceInput;
     [key: string]: unknown;
   };
 
@@ -224,7 +280,24 @@ export async function updateEmployee(req: Request, res: Response) {
 
   Object.assign(employee, rest, { updatedBy: req.user!._id });
   await employee.save();
-  return sendSuccess(res, employee);
+
+  if (createUserAccount && userPassword && !employee.userId) {
+    await createUserForEmployee(req.user!, employee, {
+      password: userPassword,
+      role: userRole,
+    });
+  }
+
+  if (leaveBalance) {
+    await upsertLeaveBalanceForEmployee(employee._id, employee.companyId, leaveBalance);
+  }
+
+  const balance = await getLeaveBalanceForEmployee(employee._id);
+  const payload = employee.toObject();
+  return sendSuccess(res, {
+    ...payload,
+    leaveBalance: balance ? formatLeaveBalance(balance) : null,
+  });
 }
 
 export async function deleteEmployee(req: Request, res: Response) {

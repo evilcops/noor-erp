@@ -1,41 +1,42 @@
-import type { ApiUser, UserRole } from "@/types/auth-user";
+import type { ApiUser } from "@/types/auth-user";
+import { hasPermissionInList } from "@/config/permissions";
 
-const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
+const ROLE_PERMISSIONS: Record<ApiUser["role"], string[]> = {
   super_admin: ["*"],
   business_owner: [
+    "dashboard:view",
     "company:view", "company:edit", "branch:*", "employee:*", "attendance:*",
     "leave:*", "recruitment:*", "performance:*", "notification:*", "report:*", "user:*",
   ],
   branch_manager: [
+    "dashboard:view",
     "branch:view", "employee:view", "employee:edit", "attendance:*",
     "leave:view", "leave:approve", "recruitment:view", "recruitment:edit",
     "performance:view", "performance:edit", "notification:view", "report:view", "report:export",
   ],
   hr_manager: [
+    "dashboard:view",
     "company:view", "branch:view", "employee:*", "attendance:view", "attendance:create",
     "attendance:edit", "attendance:delete", "attendance:approve",
     "leave:*", "recruitment:*", "performance:*", "notification:view", "report:*",
   ],
   employee: [
+    "dashboard:view",
     "employee:view", "attendance:create", "attendance:view", "leave:create", "leave:view",
     "performance:view", "notification:view",
   ],
 };
 
-function matchPermission(granted: string, required: string): boolean {
-  if (granted === "*") return true;
-  const [gRes, gAct] = granted.split(":");
-  const [rRes, rAct] = required.split(":");
-  if (gRes === rRes && (gAct === "*" || gAct === rAct)) return true;
-  return false;
+export function getEffectivePermissions(user: ApiUser | null): string[] {
+  if (!user) return [];
+  if (user.useCustomPermissions) return user.permissions ?? [];
+  if (user.permissions !== undefined && user.permissions.length > 0) return user.permissions;
+  return ROLE_PERMISSIONS[user.role] ?? [];
 }
 
 export function hasPermission(user: ApiUser | null, permission: string): boolean {
   if (!user) return false;
-  const perms = user.permissions?.length
-    ? user.permissions
-    : ROLE_PERMISSIONS[user.role] ?? [];
-  return perms.some((p) => matchPermission(p, permission));
+  return hasPermissionInList(getEffectivePermissions(user), permission);
 }
 
 export function isManager(user: ApiUser | null): boolean {
@@ -47,3 +48,9 @@ export function isHrOrAbove(user: ApiUser | null): boolean {
   if (!user) return false;
   return ["super_admin", "business_owner", "hr_manager"].includes(user.role);
 }
+
+export function isEmployeeRole(user: ApiUser | null): boolean {
+  return user?.role === "employee";
+}
+
+export { ROLE_PERMISSIONS };

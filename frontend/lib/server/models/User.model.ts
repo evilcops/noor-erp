@@ -15,6 +15,7 @@ export interface IUser extends Document {
   isActive: boolean;
   lastLogin?: Date;
   permissions: string[];
+  useCustomPermissions: boolean;
   refreshTokenHash?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -39,6 +40,7 @@ const userSchema = new Schema<IUser>(
     isActive: { type: Boolean, default: true },
     lastLogin: Date,
     permissions: { type: [String], default: [] },
+    useCustomPermissions: { type: Boolean, default: false },
     refreshTokenHash: { type: String, select: false },
   },
   { timestamps: true }

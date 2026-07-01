@@ -157,6 +157,7 @@ export async function getMe(userId: string) {
   return {
     ...sanitizeUser(user),
     permissions: getUserPermissions(user),
+    useCustomPermissions: user.useCustomPermissions ?? false,
   };
 }
 
@@ -189,6 +190,7 @@ function sanitizeUser(user: IUser) {
     employeeId: user.employeeId,
     isActive: user.isActive,
     lastLogin: user.lastLogin,
+    useCustomPermissions: user.useCustomPermissions ?? false,
   };
 }
 

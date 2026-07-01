@@ -9,6 +9,7 @@ export const ROLES = [
 export type UserRole = (typeof ROLES)[number];
 
 export const RESOURCES = [
+  "dashboard",
   "company",
   "branch",
   "employee",
@@ -46,6 +47,7 @@ export const MAX_LIMIT = 100;
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   super_admin: ["*"],
   business_owner: [
+    "dashboard:view",
     "company:view",
     "company:edit",
     "branch:*",
@@ -59,6 +61,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     "user:*",
   ],
   branch_manager: [
+    "dashboard:view",
     "branch:view",
     "employee:view",
     "employee:edit",
@@ -74,6 +77,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     "report:export",
   ],
   hr_manager: [
+    "dashboard:view",
     "company:view",
     "branch:view",
     "employee:*",
@@ -89,6 +93,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     "report:*",
   ],
   employee: [
+    "dashboard:view",
     "employee:view",
     "attendance:view",
     "attendance:create",

@@ -31,6 +31,34 @@ export async function runMigrations(): Promise<void> {
   if (empComp.modifiedCount > 0) {
     logger.info(`Migration: renamed complianceDocs.pataka→bataka in ${empComp.modifiedCount} employee(s)`);
   }
+
+  const leaveBalanceResult = await db.collection("leavebalances").updateMany(
+    { paternity: { $exists: false } },
+    {
+      $set: {
+        paternity: { total: 3, used: 0, remaining: 3 },
+      },
+    }
+  );
+  if (leaveBalanceResult.modifiedCount > 0) {
+    logger.info(
+      `Migration: added paternity leave bucket to ${leaveBalanceResult.modifiedCount} balance record(s)`
+    );
+  }
+
+  const maternityBalanceResult = await db.collection("leavebalances").updateMany(
+    { maternity: { $exists: false } },
+    {
+      $set: {
+        maternity: { total: 50, used: 0, remaining: 50 },
+      },
+    }
+  );
+  if (maternityBalanceResult.modifiedCount > 0) {
+    logger.info(
+      `Migration: added maternity leave bucket to ${maternityBalanceResult.modifiedCount} balance record(s)`
+    );
+  }
 }
 
 /**

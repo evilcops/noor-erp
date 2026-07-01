@@ -13,8 +13,10 @@ function matchesPermission(granted: string, required: string): boolean {
 }
 
 export function getUserPermissions(user: IUser): string[] {
-  const rolePerms = ROLE_PERMISSIONS[user.role as UserRole] ?? [];
-  return [...new Set([...rolePerms, ...user.permissions])];
+  if (user.useCustomPermissions) {
+    return user.permissions ?? [];
+  }
+  return ROLE_PERMISSIONS[user.role as UserRole] ?? [];
 }
 
 export function can(
@@ -99,4 +101,35 @@ export function assertSelfOrElevated(
   if (!employeeId || String(user.employeeId) !== String(employeeId)) {
     throw new AppError("FORBIDDEN", "You can only access your own data", 403);
   }
+}
+
+/** Force employee-role users to only see their own records in list queries */
+export function applyEmployeeSelfScope(
+  user: IUser,
+  filter: Record<string, unknown>,
+  queryEmployeeId?: string
+): void {
+  if (user.role === "employee") {
+    if (!user.employeeId) {
+      throw new AppError("BAD_REQUEST", "Your account is not linked to an employee profile", 400);
+    }
+    filter.employeeId = user.employeeId;
+    return;
+  }
+  if (queryEmployeeId) {
+    filter.employeeId = queryEmployeeId;
+  }
+}
+
+export function resolveEmployeeIdForQuery(user: IUser, queryEmployeeId?: string): string {
+  if (user.role === "employee") {
+    if (!user.employeeId) {
+      throw new AppError("BAD_REQUEST", "Your account is not linked to an employee profile", 400);
+    }
+    return String(user.employeeId);
+  }
+  if (!queryEmployeeId) {
+    throw new AppError("BAD_REQUEST", "Employee ID required", 400);
+  }
+  return queryEmployeeId;
 }

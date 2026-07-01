@@ -36,7 +36,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     try {
       const { user: me } = await authApi.me();
-      setUser({ ...me, permissions: me.permissions ?? [] });
+      setUser({
+        ...me,
+        permissions: me.permissions ?? [],
+        useCustomPermissions: me.useCustomPermissions ?? false,
+      });
     } catch {
       setUser(null);
     } finally {

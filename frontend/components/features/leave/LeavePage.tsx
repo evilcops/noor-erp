@@ -2,23 +2,26 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Pencil, Plus, Trash2 } from "lucide-react";
+import { Download, Eye, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { DataTable, type Column } from "@/components/common/DataTable";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { DateRangePicker } from "@/components/common/DateRangePicker";
 import { ConfirmationModal } from "@/components/common/ConfirmationModal";
+import { FileUpload } from "@/components/common/FileUpload";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
 import { Select } from "@/components/ui/Select";
 import { Tabs } from "@/components/ui/Tabs";
+import { LeaveAttachmentViewer } from "@/components/features/leave/LeaveAttachmentViewer";
 import { useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useEmployees } from "@/hooks/useEmployees";
 import { leaveApi, type LeaveRequest } from "@/lib/api/leave";
+import { LEAVE_BALANCE_TYPES, leaveTypeRequiresDocument } from "@/lib/leave/constants";
 
 const LEAVE_TYPES = [
   { value: "annual", label: "Annual" },
@@ -45,6 +48,13 @@ const emptyForm = {
   endDate: "",
   reason: "",
   status: "pending",
+};
+
+const DOCUMENT_HINTS: Record<string, string> = {
+  sick: "Medical certificate or doctor's note",
+  emergency: "Proof supporting the emergency leave",
+  maternity: "Medical certificate or hospital confirmation of pregnancy/maternity",
+  paternity: "Birth certificate or hospital discharge summary",
 };
 
 function monthRange() {
@@ -76,6 +86,12 @@ export function LeavePage() {
   const [selected, setSelected] = useState<LeaveRequest | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [form, setForm] = useState(emptyForm);
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  const [attachmentError, setAttachmentError] = useState("");
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [reviewLeave, setReviewLeave] = useState<LeaveRequest | null>(null);
+
+  const formRequiresDocument = !selected && leaveTypeRequiresDocument(form.type);
 
   const { data: employeesData } = useEmployees({
     limit: 200,
@@ -125,13 +141,27 @@ export function LeavePage() {
   });
 
   const saveMut = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      if (formRequiresDocument && !attachmentFile) {
+        throw new Error("Supporting document is required for this leave type");
+      }
+
+      let attachmentUrl: string | undefined;
+      if (attachmentFile) {
+        const fd = new FormData();
+        fd.append("file", attachmentFile);
+        if (form.employeeId) fd.append("employeeId", form.employeeId);
+        const uploaded = await leaveApi.uploadAttachment(fd);
+        attachmentUrl = uploaded.attachmentUrl;
+      }
+
       const payload = {
         employeeId: form.employeeId,
         type: form.type,
         startDate: form.startDate,
         endDate: form.endDate,
         reason: form.reason || undefined,
+        ...(attachmentUrl ? { attachmentUrl } : {}),
         ...(selected ? { status: form.status } : {}),
       };
       return selected ? leaveApi.update(selected._id, payload) : leaveApi.request(payload);
@@ -147,6 +177,8 @@ export function LeavePage() {
       setFormOpen(false);
       setSelected(null);
       setForm(emptyForm);
+      setAttachmentFile(null);
+      setAttachmentError("");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -155,6 +187,8 @@ export function LeavePage() {
     mutationFn: () => leaveApi.delete(selected!._id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["leaves-list"] });
+      qc.invalidateQueries({ queryKey: ["leave-balance"] });
+      qc.invalidateQueries({ queryKey: ["my-leave-balance"] });
       toast.success("Leave cancelled");
       setDeleteOpen(false);
       setSelected(null);
@@ -166,6 +200,8 @@ export function LeavePage() {
     mutationFn: (id: string) => leaveApi.approve(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["leaves-list"] });
+      qc.invalidateQueries({ queryKey: ["leave-balance"] });
+      qc.invalidateQueries({ queryKey: ["my-leave-balance"] });
       toast.success("Leave approved");
     },
     onError: (e: Error) => toast.error(e.message),
@@ -184,6 +220,8 @@ export function LeavePage() {
   function openCreate() {
     setSelected(null);
     setForm({ ...emptyForm, employeeId: employeeFilter || "" });
+    setAttachmentFile(null);
+    setAttachmentError("");
     setFormOpen(true);
   }
 
@@ -244,12 +282,47 @@ export function LeavePage() {
     { key: "days", header: "Days", cell: (r) => r.totalDays },
     { key: "status", header: "Status", cell: (r) => <StatusBadge status={r.status} /> },
     {
+      key: "document",
+      header: "Document",
+      cell: (r) =>
+        r.attachmentUrl ? (
+          <Button
+            variant="ghost"
+            className="h-8 text-xs"
+            onClick={() => {
+              setReviewLeave(r);
+              setViewerOpen(true);
+            }}
+          >
+            <Eye className="mr-1 h-3.5 w-3.5" />
+            Review
+          </Button>
+        ) : leaveTypeRequiresDocument(r.type) ? (
+          <span className="text-xs text-amber-600">Missing</span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        ),
+    },
+    {
       key: "actions",
       header: "Actions",
       cell: (r) => (
         <div className="flex gap-1">
           {r.status === "pending" && can("leave:approve") ? (
             <>
+              {r.attachmentUrl ? (
+                <Button
+                  variant="ghost"
+                  className="h-8 text-xs"
+                  onClick={() => {
+                    setReviewLeave(r);
+                    setViewerOpen(true);
+                  }}
+                >
+                  <Eye className="mr-1 h-3.5 w-3.5" />
+                  Doc
+                </Button>
+              ) : null}
               <Button variant="ghost" onClick={() => approveMut.mutate(r._id)}>
                 Approve
               </Button>
@@ -322,12 +395,19 @@ export function LeavePage() {
           </div>
           {balance ? (
             <div className="flex flex-wrap gap-4">
-              {(["annual", "sick", "emergency", "unpaid"] as const).map((type) => (
-                <div key={type} className="min-w-[120px]">
+              {LEAVE_BALANCE_TYPES.map((type) => (
+                <div key={type} className="min-w-[140px] rounded-lg bg-muted/40 px-3 py-2">
                   <p className="text-xs capitalize text-muted-foreground">{type}</p>
-                  <p className="text-lg font-semibold">
+                  <p className="text-sm">
+                    <span className="text-muted-foreground">Taken:</span> {balance[type].used}
+                  </p>
+                  <p className="text-sm font-semibold">
+                    <span className="font-normal text-muted-foreground">Remaining:</span>{" "}
                     {balance[type].remaining}
-                    <span className="text-sm font-normal text-muted-foreground"> / {balance[type].total}</span>
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {" "}
+                      / {balance[type].total}
+                    </span>
                   </p>
                 </div>
               ))}
@@ -422,12 +502,25 @@ export function LeavePage() {
 
       <Modal
         open={formOpen}
-        onOpenChange={setFormOpen}
+        onOpenChange={(open) => {
+          setFormOpen(open);
+          if (!open) {
+            setAttachmentFile(null);
+            setAttachmentError("");
+          }
+        }}
         title={selected ? "Edit Leave" : "Request Leave"}
         footer={
           <Button
             loading={saveMut.isPending}
-            onClick={() => saveMut.mutate()}
+            onClick={() => {
+              if (formRequiresDocument && !attachmentFile) {
+                setAttachmentError("Supporting document is required");
+                return;
+              }
+              setAttachmentError("");
+              saveMut.mutate();
+            }}
             disabled={!form.employeeId || !form.startDate || !form.endDate}
           >
             {selected ? "Save Changes" : "Submit Request"}
@@ -448,7 +541,11 @@ export function LeavePage() {
             <Label>Leave Type *</Label>
             <Select
               value={form.type}
-              onChange={(e) => setForm({ ...form, type: e.target.value })}
+              onChange={(e) => {
+                setForm({ ...form, type: e.target.value });
+                setAttachmentFile(null);
+                setAttachmentError("");
+              }}
               options={LEAVE_TYPES}
             />
           </div>
@@ -480,6 +577,39 @@ export function LeavePage() {
               />
             </div>
           ) : null}
+          {formRequiresDocument ? (
+            <div>
+              <Label>Supporting Document *</Label>
+              <p className="mb-2 text-xs text-muted-foreground">
+                {DOCUMENT_HINTS[form.type] ?? "Upload a supporting document"}
+              </p>
+              <FileUpload
+                accept=".pdf,.png,.jpg,.jpeg,.webp"
+                label={attachmentFile ? attachmentFile.name : "Upload PDF or image"}
+                onFileSelect={(file) => {
+                  setAttachmentFile(file);
+                  setAttachmentError("");
+                }}
+                error={attachmentError}
+              />
+            </div>
+          ) : null}
+          {selected?.attachmentUrl ? (
+            <div>
+              <Label>Attached Document</Label>
+              <Button
+                variant="secondary"
+                className="mt-1"
+                onClick={() => {
+                  setReviewLeave(selected);
+                  setViewerOpen(true);
+                }}
+              >
+                <Eye className="mr-2 h-4 w-4" />
+                Review document
+              </Button>
+            </div>
+          ) : null}
           <div>
             <Label>Reason</Label>
             <textarea
@@ -491,6 +621,17 @@ export function LeavePage() {
           </div>
         </div>
       </Modal>
+
+      <LeaveAttachmentViewer
+        attachmentUrl={reviewLeave?.attachmentUrl}
+        title={
+          reviewLeave
+            ? `${typeof reviewLeave.employeeId === "object" ? `${reviewLeave.employeeId.firstName} ${reviewLeave.employeeId.lastName}` : "Employee"} — ${reviewLeave.type} leave document`
+            : "Leave document"
+        }
+        open={viewerOpen}
+        onOpenChange={setViewerOpen}
+      />
 
       <Modal
         open={rejectOpen}

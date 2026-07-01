@@ -10,6 +10,16 @@ const optionalDocSchema = z.object({
   expiryDate: z.string().optional(),
 });
 
+const leaveBalanceFormSchema = z.object({
+  year: z.coerce.number().int().min(2000).max(2100),
+  annualTotal: z.coerce.number().min(0, "Annual leave days required"),
+  sickTotal: z.coerce.number().min(0, "Sick leave days required"),
+  emergencyTotal: z.coerce.number().min(0, "Emergency leave days required"),
+  unpaidTotal: z.coerce.number().min(0, "Unpaid leave days required"),
+  maternityTotal: z.coerce.number().min(0, "Maternity leave days required"),
+  paternityTotal: z.coerce.number().min(0, "Paternity leave days required"),
+});
+
 export const employeeFormSchema = z
   .object({
     firstName: z.string().min(1, "First name is required"),
@@ -37,6 +47,20 @@ export const employeeFormSchema = z
     // Vehicle docs — validated conditionally in superRefine
     mulkiya: optionalDocSchema.optional(),
     car_insurance: optionalDocSchema.optional(),
+    createUserAccount: z.boolean().optional(),
+    userPassword: z.string().optional(),
+    userRole: z.enum(["super_admin", "business_owner", "branch_manager", "hr_manager", "employee"]).optional(),
+    leaveBalance: leaveBalanceFormSchema,
+    leaveBalanceUsed: z
+      .object({
+        annual: z.number().optional(),
+        sick: z.number().optional(),
+        emergency: z.number().optional(),
+        unpaid: z.number().optional(),
+        maternity: z.number().optional(),
+        paternity: z.number().optional(),
+      })
+      .optional(),
   })
   .superRefine((data, ctx) => {
     if (data.hasVehicle) {
@@ -68,6 +92,13 @@ export const employeeFormSchema = z
           message: "Expiry date is required",
         });
       }
+    }
+    if (data.createUserAccount && (!data.userPassword || data.userPassword.length < 8)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["userPassword"],
+        message: "Password must be at least 8 characters",
+      });
     }
   });
 
