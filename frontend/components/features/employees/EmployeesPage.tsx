@@ -210,7 +210,7 @@ export function EmployeesPage() {
   async function handleSubmit(
     form: EmployeeFormValues,
     files: ComplianceFiles,
-    extra?: { familyType?: "individual" | "family"; familyMembers?: import("@/types/employee").FamilyMember[]; familyBatakaFiles?: Map<number, File> }
+    extra?: { familyType?: "individual" | "family"; familyMembers?: import("@/types/employee").FamilyMember[]; familyBatakaFiles?: Map<number, File>; contractFile?: File | null }
   ) {
     const branch = branches.find((b) => b._id === form.branchId);
     const companyId = user?.companyId ?? branch?.companyId;
@@ -224,11 +224,18 @@ export function EmployeesPage() {
     }
     const payload = formToPayload(form, companyId, extra);
     const fbFiles = extra?.familyBatakaFiles;
+    const contractFile = extra?.contractFile;
     const createdUserAccount = form.createUserAccount && form.userPassword;
     if (selected && formOpen) {
       const updated = await update.mutateAsync({ id: selected._id, data: payload });
       if (Object.keys(files).length) {
         await uploadComplianceFiles(selected._id, files, form);
+      }
+      if (contractFile) {
+        const fd = new FormData();
+        fd.append("file", contractFile);
+        fd.append("type", "contract");
+        await uploadDoc.mutateAsync({ id: selected._id, formData: fd });
       }
       if (fbFiles?.size && updated?.familyMembers?.length) {
         await uploadFamilyBatakaFiles(selected._id, updated.familyMembers, fbFiles);
@@ -240,6 +247,12 @@ export function EmployeesPage() {
       const created = await create.mutateAsync(payload);
       if (Object.keys(files).length && created?._id) {
         await uploadComplianceFiles(created._id, files, form);
+      }
+      if (contractFile && created?._id) {
+        const fd = new FormData();
+        fd.append("file", contractFile);
+        fd.append("type", "contract");
+        await uploadDoc.mutateAsync({ id: created._id, formData: fd });
       }
       if (fbFiles?.size && created?._id && created?.familyMembers?.length) {
         await uploadFamilyBatakaFiles(created._id, created.familyMembers, fbFiles);

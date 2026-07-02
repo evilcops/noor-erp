@@ -18,6 +18,7 @@ import { useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useEmployees } from "@/hooks/useEmployees";
 import { attendanceApi, type AttendanceRecord } from "@/lib/api/attendance";
+import { formatDate } from "@/lib/date";
 
 const STATUS_OPTIONS = [
   { value: "", label: "All Status" },
@@ -211,7 +212,7 @@ export function AttendancePage() {
       ...rows.map((r) => {
         const name = typeof r.employeeId === "object" ? `${r.employeeId.firstName} ${r.employeeId.lastName}` : "";
         return [
-          new Date(r.date).toLocaleDateString(),
+          formatDate(r.date),
           `"${name}"`,
           r.timeIn ? new Date(r.timeIn).toLocaleTimeString() : "",
           r.timeOut ? new Date(r.timeOut).toLocaleTimeString() : "",
@@ -233,7 +234,7 @@ export function AttendancePage() {
   }
 
   const columns: Column<AttendanceRecord>[] = [
-    { key: "date", header: "Date", cell: (r) => new Date(r.date).toLocaleDateString() },
+    { key: "date", header: "Date", cell: (r) => formatDate(r.date) },
     {
       key: "employee",
       header: "Employee",

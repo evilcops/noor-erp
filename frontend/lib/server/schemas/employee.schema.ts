@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { validateFamilyMembers, normalizeFamilyMembers } from "../../employee/family";
 import { ROLES } from "../config/constants";
 
 const complianceDocSchema = z.object({
@@ -25,7 +26,7 @@ const familyMemberSchema = z.object({
   _id: z.string().optional(),
   name: z.string().min(1),
   profilePicture: z.string().optional(),
-  relationship: z.enum(["spouse", "son", "daughter", "parents"]),
+  relationship: z.enum(["spouse", "son", "daughter", "mother", "father", "parents"]),
   bataka: familyMemberBatakaSchema.optional(),
 });
 
@@ -35,6 +36,28 @@ const userAccountRefine = (data: { createUserAccount?: boolean; userPassword?: s
       code: z.ZodIssueCode.custom,
       path: ["userPassword"],
       message: "Password is required when creating a user account",
+    });
+  }
+};
+
+const familyMembersRefine = (
+  data: {
+    gender?: "male" | "female" | "other";
+    familyMembers?: Array<{ name: string; relationship: string }>;
+  },
+  ctx: z.RefinementCtx
+) => {
+  if (!data.familyMembers?.length || !data.gender) return;
+
+  const normalizedMembers = normalizeFamilyMembers(
+    data.familyMembers as Array<{ name: string; relationship: string }>
+  );
+
+  for (const issue of validateFamilyMembers(normalizedMembers, data.gender)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: issue.path.split("."),
+      message: issue.message,
     });
   }
 };
@@ -59,6 +82,7 @@ const employeeBodySchema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   email: z.string().email(),
+  gender: z.enum(["male", "female", "other"]),
   phone: z.string().optional(),
   address: z.string().optional(),
   emergencyContact: z
@@ -95,6 +119,10 @@ const employeeUpdateBodySchema = employeeBodySchema
     leaveBalance: leaveBalanceSchema.optional(),
   });
 
-export const createEmployeeSchema = employeeBodySchema.superRefine(userAccountRefine);
+export const createEmployeeSchema = employeeBodySchema
+  .superRefine(userAccountRefine)
+  .superRefine(familyMembersRefine);
 
-export const updateEmployeeSchema = employeeUpdateBodySchema.superRefine(userAccountRefine);
+export const updateEmployeeSchema = employeeUpdateBodySchema
+  .superRefine(userAccountRefine)
+  .superRefine(familyMembersRefine);

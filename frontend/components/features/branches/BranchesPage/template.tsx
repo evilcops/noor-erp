@@ -21,6 +21,7 @@ import { getAccessToken } from "@/lib/api/token";
 import type { BranchesPageTemplateProps } from "./script";
 import type { BranchDocument } from "@/types/documents";
 import type { Branch } from "@/types/branch";
+import { formatDate } from "@/lib/date";
 import styles from "./style.module.css";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -46,11 +47,6 @@ const BRANCH_DOC_LABELS: Record<string, string> = {
   money_policy: "Money Policy",
   custom: "Custom Document",
 };
-
-function fmtDate(d?: string) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-}
 
 function daysLeft(expiry?: string): { label: string; cls: string } | null {
   if (!expiry) return null;
@@ -336,9 +332,9 @@ function BranchDocumentsPanel({ branch, canEdit, onClose, initialDocumentId, onD
                       )}
                     </div>
                     <div className="mt-1.5 flex flex-wrap gap-x-6 text-xs text-muted-foreground">
-                      {doc.issuanceDate ? <span>Issued: {fmtDate(doc.issuanceDate)}</span> : null}
+                      {doc.issuanceDate ? <span>Issued: {formatDate(doc.issuanceDate)}</span> : null}
                       {doc.expiryDate ? (
-                        <span className={expiry?.cls ?? ""}>Expires: {fmtDate(doc.expiryDate)}{expiry ? ` · ${expiry.label}` : ""}</span>
+                        <span className={expiry?.cls ?? ""}>Expires: {formatDate(doc.expiryDate)}{expiry ? ` · ${expiry.label}` : ""}</span>
                       ) : <span>No expiry set</span>}
                     </div>
                     {doc.notes ? <p className="mt-1 text-xs text-muted-foreground">{doc.notes}</p> : null}

@@ -21,7 +21,8 @@ import { useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useEmployees } from "@/hooks/useEmployees";
 import { leaveApi, type LeaveRequest } from "@/lib/api/leave";
-import { LEAVE_BALANCE_TYPES, leaveTypeRequiresDocument } from "@/lib/leave/constants";
+import { formatDate, formatDateRange } from "@/lib/date";
+import { isLeaveTypeAllowedForGender, leaveBalanceTypesForGender, leaveTypeRequiresDocument } from "@/lib/leave/constants";
 
 const LEAVE_TYPES = [
   { value: "annual", label: "Annual" },
@@ -98,6 +99,17 @@ export function LeavePage() {
     status: "active",
     branchId: branchFilter || activeBranchId || undefined,
   });
+
+  const formEmployeeGender = useMemo(
+    () => employeesData?.data?.find((e) => e._id === form.employeeId)?.gender,
+    [employeesData, form.employeeId]
+  );
+
+  const availableLeaveTypes = useMemo(
+    () => LEAVE_TYPES.filter((t) => isLeaveTypeAllowedForGender(t.value, formEmployeeGender)),
+    [formEmployeeGender]
+  );
+
   const employeeOptions = useMemo(
     () =>
       (employeesData?.data ?? []).map((e) => ({
@@ -139,6 +151,16 @@ export function LeavePage() {
     queryFn: () => leaveApi.getBalance({ employeeId: balanceEmployeeId }),
     enabled: !!balanceEmployeeId,
   });
+
+  const balanceEmployeeGender = useMemo(
+    () => employeesData?.data?.find((e) => e._id === balanceEmployeeId)?.gender,
+    [employeesData, balanceEmployeeId]
+  );
+
+  const visibleBalanceTypes = useMemo(
+    () => leaveBalanceTypesForGender(balanceEmployeeGender),
+    [balanceEmployeeGender]
+  );
 
   const saveMut = useMutation({
     mutationFn: async () => {
@@ -248,8 +270,8 @@ export function LeavePage() {
         return [
           `"${name}"`,
           r.type,
-          new Date(r.startDate).toLocaleDateString(),
-          new Date(r.endDate).toLocaleDateString(),
+          formatDate(r.startDate),
+          formatDate(r.endDate),
           r.totalDays,
           r.status,
           `"${(r.reason ?? "").replace(/"/g, '""')}"`,
@@ -276,8 +298,7 @@ export function LeavePage() {
     {
       key: "dates",
       header: "Dates",
-      cell: (r) =>
-        `${new Date(r.startDate).toLocaleDateString()} – ${new Date(r.endDate).toLocaleDateString()}`,
+      cell: (r) => formatDateRange(r.startDate, r.endDate),
     },
     { key: "days", header: "Days", cell: (r) => r.totalDays },
     { key: "status", header: "Status", cell: (r) => <StatusBadge status={r.status} /> },
@@ -395,7 +416,7 @@ export function LeavePage() {
           </div>
           {balance ? (
             <div className="flex flex-wrap gap-4">
-              {LEAVE_BALANCE_TYPES.map((type) => (
+              {visibleBalanceTypes.map((type) => (
                 <div key={type} className="min-w-[140px] rounded-lg bg-muted/40 px-3 py-2">
                   <p className="text-xs capitalize text-muted-foreground">{type}</p>
                   <p className="text-sm">
@@ -493,7 +514,7 @@ export function LeavePage() {
                 {l.type} — {l.totalDays} days
               </p>
               <p className="text-xs">
-                {new Date(l.startDate).toLocaleDateString()} – {new Date(l.endDate).toLocaleDateString()}
+                {formatDateRange(l.startDate, l.endDate)}
               </p>
             </div>
           ))}
@@ -546,7 +567,7 @@ export function LeavePage() {
                 setAttachmentFile(null);
                 setAttachmentError("");
               }}
-              options={LEAVE_TYPES}
+              options={availableLeaveTypes}
             />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">

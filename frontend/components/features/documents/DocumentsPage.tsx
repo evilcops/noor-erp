@@ -21,6 +21,7 @@ import { getAccessToken } from "@/lib/api/token";
 import type { BusinessDocument, BranchDocument } from "@/types/documents";
 import type { Employee } from "@/types/employee";
 import { employeeApi } from "@/lib/api/employees";
+import { formatDate } from "@/lib/date";
 
 // ─── Label maps ──────────────────────────────────────────────────────────────
 
@@ -62,11 +63,6 @@ function statusColor(status?: string) {
   if (status === "expired") return "text-destructive";
   if (status === "expiring_soon") return "text-amber-600";
   return "text-emerald-600";
-}
-
-function formatDate(d?: string) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
 function daysLeft(expiry?: string) {

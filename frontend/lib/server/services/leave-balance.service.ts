@@ -1,6 +1,11 @@
 import type { Types } from "mongoose";
 import { LeaveBalance, type ILeaveBalance, type ILeaveBalanceBucket } from "../models/LeaveBalance.model";
-import { DEFAULT_MATERNITY_LEAVE_DAYS, DEFAULT_PATERNITY_LEAVE_DAYS } from "../../../lib/leave/constants";
+import {
+  DEFAULT_MATERNITY_LEAVE_DAYS,
+  DEFAULT_PATERNITY_LEAVE_DAYS,
+  maternityLeaveForGender,
+  paternityLeaveForGender,
+} from "../../../lib/leave/constants";
 import { AppError } from "../utils/AppError";
 
 export type LeaveBalanceInput = {
@@ -172,6 +177,21 @@ function updateBucket(existing: ILeaveBalanceBucket | undefined, newTotal: numbe
 export async function getLeaveBalanceForEmployee(employeeId: Types.ObjectId | string, year?: number) {
   const y = year ?? new Date().getFullYear();
   return LeaveBalance.findOne({ employeeId, year });
+}
+
+export function normalizeLeaveBalanceForGender(
+  input: LeaveBalanceInput,
+  gender?: string | null
+): LeaveBalanceInput {
+  return {
+    ...input,
+    maternity: {
+      total: maternityLeaveForGender(gender) ? input.maternity.total : 0,
+    },
+    paternity: {
+      total: paternityLeaveForGender(gender) ? input.paternity.total : 0,
+    },
+  };
 }
 
 export async function createLeaveBalanceForEmployee(

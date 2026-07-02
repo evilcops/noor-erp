@@ -9,6 +9,7 @@ import {
   createLeaveBalanceForEmployee,
   formatLeaveBalance,
   getLeaveBalanceForEmployee,
+  normalizeLeaveBalanceForGender,
   upsertLeaveBalanceForEmployee,
   type LeaveBalanceInput,
 } from "../services/leave-balance.service";
@@ -24,6 +25,7 @@ import {
   sendSuccess,
 } from "../utils/apiResponse";
 import { AppError } from "../utils/AppError";
+import { validateFamilyMembers, normalizeFamilyMembers } from "../../employee/family";
 
 // Passport: 9 / 6 / 3 months; all other docs: 45 / 30 / 15 days
 const PASSPORT_ALERT_DAYS = [274, 182, 91] as const;
@@ -133,7 +135,11 @@ export async function createEmployee(req: Request, res: Response) {
   if (!leaveBalance) {
     throw new AppError("BAD_REQUEST", "Leave balance is required", 400);
   }
-  await createLeaveBalanceForEmployee(employee._id, employee.companyId, leaveBalance);
+  await createLeaveBalanceForEmployee(
+    employee._id,
+    employee.companyId,
+    normalizeLeaveBalanceForGender(leaveBalance, employee.gender)
+  );
 
   const balance = await getLeaveBalanceForEmployee(employee._id);
   const payload = employee.toObject();
@@ -252,8 +258,22 @@ export async function updateEmployee(req: Request, res: Response) {
   // Update family type and members explicitly (Object.assign doesn't merge Mongoose subdoc arrays)
   if (familyType !== undefined) employee.familyType = familyType;
   if (familyMembers !== undefined) {
+    const effectiveGender = (rest.gender ?? employee.gender) as
+      | "male"
+      | "female"
+      | "other"
+      | undefined;
+    const normalizedMembers = normalizeFamilyMembers(
+      familyMembers as Parameters<typeof normalizeFamilyMembers>[0]
+    );
+    const familyValidationErrors = validateFamilyMembers(normalizedMembers, effectiveGender);
+    const familyLimitError = familyValidationErrors.find((issue) => issue.path === "familyMembers");
+    if (familyLimitError) {
+      throw new AppError("VALIDATION_ERROR", familyLimitError.message, 400);
+    }
+
     // Preserve existing bataka.fileUrl for members that already have one
-    employee.familyMembers = familyMembers.map((incoming) => {
+    employee.familyMembers = normalizedMembers.map((incoming) => {
       const existing = (employee.familyMembers ?? []).find(
         (m) => incoming._id && String(m._id) === incoming._id
       );
@@ -289,7 +309,11 @@ export async function updateEmployee(req: Request, res: Response) {
   }
 
   if (leaveBalance) {
-    await upsertLeaveBalanceForEmployee(employee._id, employee.companyId, leaveBalance);
+    await upsertLeaveBalanceForEmployee(
+      employee._id,
+      employee.companyId,
+      normalizeLeaveBalanceForGender(leaveBalance, employee.gender)
+    );
   }
 
   const balance = await getLeaveBalanceForEmployee(employee._id);

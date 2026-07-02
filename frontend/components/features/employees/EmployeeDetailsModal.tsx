@@ -9,6 +9,8 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { DocumentViewer } from "@/components/features/employees/DocumentViewer";
 import { useEmployee } from "@/hooks/useEmployees";
+import { formatDate, formatDateTime } from "@/lib/date";
+import { getFamilyRelationshipLabel } from "@/lib/employee/family";
 import type { Employee, EmployeeDocument, FamilyMember } from "@/types/employee";
 
 const COMPLIANCE_TYPES = new Set([
@@ -53,7 +55,7 @@ function docExpiryInfo(doc: EmployeeDocument): {
 
   if (days <= critical) return { label: `Expires in ${days}d`, color: "text-destructive", icon: true };
   if (days <= warn) return { label: `Expires in ${days}d`, color: "text-warning", icon: true };
-  return { label: new Date(doc.expiryDate).toLocaleDateString(), color: "text-muted-foreground", icon: false };
+  return { label: formatDate(doc.expiryDate), color: "text-muted-foreground", icon: false };
 }
 
 interface EmployeeDetailsModalProps {
@@ -162,7 +164,7 @@ export function EmployeeDetailsModal({
                     label="Joined"
                     value={
                       employee.joiningDate
-                        ? new Date(employee.joiningDate).toLocaleDateString()
+                        ? formatDate(employee.joiningDate)
                         : undefined
                     }
                   />
@@ -195,10 +197,10 @@ export function EmployeeDetailsModal({
                 ) : null}
                 <Section title="Activity">
                   <p className="text-sm">
-                    Created {new Date(employee.createdAt).toLocaleString()}
+                    Created {formatDateTime(employee.createdAt)}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    Last updated {new Date(employee.updatedAt).toLocaleString()}
+                    Last updated {formatDateTime(employee.updatedAt)}
                   </p>
                 </Section>
               </div>
@@ -290,7 +292,7 @@ function DocRow({ doc, onView }: { doc: EmployeeDocument; onView: () => void }) 
         <div className="mt-0.5 flex flex-wrap gap-x-4 gap-y-0.5">
           {doc.issuanceDate ? (
             <span className="text-xs text-muted-foreground">
-              Issued {new Date(doc.issuanceDate).toLocaleDateString()}
+              Issued {formatDate(doc.issuanceDate)}
             </span>
           ) : null}
           {info ? (
@@ -369,13 +371,6 @@ function Field({ label, value }: { label: string; value?: string | null }) {
 // FamilyMembersPanel — shown in the Family tab of EmployeeDetailsModal
 // ---------------------------------------------------------------------------
 
-const RELATIONSHIP_LABELS: Record<string, string> = {
-  spouse: "Spouse",
-  son: "Son",
-  daughter: "Daughter",
-  parents: "Parents",
-};
-
 function FamilyMembersPanel({
   members,
   onView,
@@ -434,7 +429,7 @@ function FamilyMembersPanel({
             ? `Expired ${Math.abs(expiryDays)}d ago`
             : expiryDays === 0
             ? "Expires today"
-            : `Expires in ${expiryDays}d (${new Date(bataka!.expiryDate!).toLocaleDateString()})`;
+            : `Expires in ${expiryDays}d (${formatDate(bataka!.expiryDate!)})`;
 
         return (
           <div
@@ -451,7 +446,7 @@ function FamilyMembersPanel({
               <div className="min-w-0 flex-1">
                 <p className="font-medium leading-tight">{member.name || `Member ${idx + 1}`}</p>
                 <p className="text-xs capitalize text-muted-foreground">
-                  {RELATIONSHIP_LABELS[member.relationship] ?? member.relationship}
+                  {getFamilyRelationshipLabel(member.relationship)}
                 </p>
               </div>
               <span className="rounded-full border border-border bg-background px-2.5 py-0.5 text-xs font-medium capitalize text-muted-foreground">
@@ -491,7 +486,7 @@ function FamilyMembersPanel({
                       </span>
                       <p className="text-xs text-muted-foreground">
                         {bataka?.issueDate
-                          ? new Date(bataka.issueDate).toLocaleDateString()
+                          ? formatDate(bataka.issueDate)
                           : "—"}
                       </p>
                     </div>

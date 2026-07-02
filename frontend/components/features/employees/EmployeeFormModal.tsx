@@ -17,6 +17,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { ROLE_LABELS } from "@/config/permissions";
 import { employeeFormSchema, type EmployeeFormValues } from "@/lib/validations/employee";
 import { employeeApi } from "@/lib/api/employees";
+import { formatDate } from "@/lib/date";
 import type {
   ComplianceDocInput,
   ComplianceDocType,
@@ -28,7 +29,25 @@ import type {
   FamilyMember,
   FamilyRelationship,
 } from "@/types/employee";
-import { DEFAULT_MATERNITY_LEAVE_DAYS, DEFAULT_PATERNITY_LEAVE_DAYS } from "@/lib/leave/constants";
+import {
+  DEFAULT_MATERNITY_LEAVE_DAYS,
+  DEFAULT_PATERNITY_LEAVE_DAYS,
+  maternityLeaveForGender,
+  paternityLeaveForGender,
+} from "@/lib/leave/constants";
+import {
+  canSetFamilyRelationship,
+  countFamilyRelationship,
+  defaultRelationshipForNewMember,
+  familyLimitsHint,
+  getRelationshipOptionsForMember,
+  getFamilyRelationshipLabel,
+  maxSpousesForGender,
+  normalizeFamilyMembers,
+  trimSpousesForGender,
+  validateFamilyMembers,
+} from "@/lib/employee/family";
+import type { EmployeeGender } from "@/types/employee";
 
 const DEPARTMENTS = ["HR", "IT", "Sales", "Operations", "Finance", "Marketing"];
 const EMPLOYMENT_TYPES = [
@@ -56,7 +75,7 @@ const COMPLIANCE_DOC_KEYS = [
 
 type ComplianceKey = (typeof COMPLIANCE_DOC_KEYS)[number];
 
-const PERSONAL_FIELDS = ["firstName", "lastName", "email", "userPassword"];
+const PERSONAL_FIELDS = ["firstName", "lastName", "email", "gender", "userPassword"];
 const EMPLOYMENT_FIELDS = ["branchId", "department", "designation", "joiningDate"];
 const STATUS_FIELDS = ["status"];
 const DOC_FIELDS = [
@@ -77,6 +96,21 @@ const DOC_FIELDS = [
   "car_insurance.file",
 ];
 
+const GENDER_OPTIONS = [
+  { value: "male", label: "Male" },
+  { value: "female", label: "Female" },
+  { value: "other", label: "Other" },
+];
+
+const LEAVE_BALANCE_ROWS = [
+  ["annual", "annualTotal", "Annual Leave"] as const,
+  ["sick", "sickTotal", "Sick Leave"] as const,
+  ["emergency", "emergencyTotal", "Emergency Leave"] as const,
+  ["unpaid", "unpaidTotal", "Unpaid Leave"] as const,
+  ["maternity", "maternityTotal", "Maternity Leave"] as const,
+  ["paternity", "paternityTotal", "Paternity Leave"] as const,
+] as const;
+
 const LEAVE_BALANCE_FIELDS = [
   "leaveBalance.year",
   "leaveBalance.annualTotal",
@@ -86,6 +120,14 @@ const LEAVE_BALANCE_FIELDS = [
   "leaveBalance.maternityTotal",
   "leaveBalance.paternityTotal",
 ];
+
+function leaveBalanceRowsForGender(gender?: EmployeeGender | "") {
+  return LEAVE_BALANCE_ROWS.filter(([usedKey]) => {
+    if (usedKey === "maternity") return maternityLeaveForGender(gender);
+    if (usedKey === "paternity") return paternityLeaveForGender(gender);
+    return true;
+  });
+}
 
 function defaultLeaveBalanceForm() {
   return {
@@ -132,6 +174,7 @@ const EMPTY: EmployeeFormValues = {
   firstName: "",
   lastName: "",
   email: "",
+  gender: "male",
   phone: "",
   address: "",
   emergencyContactName: "",
@@ -167,7 +210,7 @@ interface EmployeeFormModalProps {
   initialTab?: "personal" | "employment" | "status" | "documents" | "family" | "leave-balance";
   focusDocType?: ComplianceDocType;
   focusFamilyMemberId?: string;
-  onSubmit: (values: EmployeeFormValues, files: ComplianceFiles, extra?: { familyType?: "individual" | "family"; familyMembers?: FamilyMember[]; familyBatakaFiles?: Map<number, File> }) => Promise<void>;
+  onSubmit: (values: EmployeeFormValues, files: ComplianceFiles, extra?: { familyType?: "individual" | "family"; familyMembers?: FamilyMember[]; familyBatakaFiles?: Map<number, File>; contractFile?: File | null }) => Promise<void>;
   onUploadDocument?: (file: File, type: string, issuanceDate: string, expiryDate: string) => Promise<void>;
   loading?: boolean;
 }
@@ -194,6 +237,7 @@ export function EmployeeFormModal({
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [profilePicFile, setProfilePicFile] = useState<File | null>(null);
   const [familyBatakaFiles, setFamilyBatakaFiles] = useState<Map<number, File>>(new Map());
+  const [contractFile, setContractFile] = useState<File | null>(null);
 
   const { data: employeeDetail } = useQuery({
     queryKey: ["employee-detail", employee?._id],
@@ -214,6 +258,7 @@ export function EmployeeFormModal({
         firstName: employee.firstName,
         lastName: employee.lastName,
         email: employee.email,
+        gender: employee.gender ?? "male",
         phone: employee.phone ?? "",
         address: employee.address ?? "",
         emergencyContactName: employee.emergencyContact?.name ?? "",
@@ -245,9 +290,10 @@ export function EmployeeFormModal({
     }
     setFiles(EMPTY_FILES);
     setFamilyType(employee?.familyType ?? "individual");
-    setFamilyMembers(employee?.familyMembers ?? []);
+    setFamilyMembers(normalizeFamilyMembers(employee?.familyMembers ?? []));
     setProfilePicFile(null);
     setFamilyBatakaFiles(new Map());
+    setContractFile(null);
     setTab(initialTab ?? "personal");
     setErrors({});
   }, [employee, open, branches, initialTab]);
@@ -293,6 +339,33 @@ export function EmployeeFormModal({
       return next;
     });
   }
+
+  function updateGender(gender: EmployeeGender) {
+    setForm((prev) => ({
+      ...prev,
+      gender,
+      leaveBalance: {
+        ...prev.leaveBalance,
+        maternityTotal: maternityLeaveForGender(gender)
+          ? prev.leaveBalance.maternityTotal || DEFAULT_MATERNITY_LEAVE_DAYS
+          : 0,
+        paternityTotal: paternityLeaveForGender(gender)
+          ? prev.leaveBalance.paternityTotal || DEFAULT_PATERNITY_LEAVE_DAYS
+          : 0,
+      },
+    }));
+    setFamilyMembers((prev) => trimSpousesForGender(prev, gender));
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.gender;
+      delete next.familyMembers;
+      return next;
+    });
+  }
+
+  const existingContractDoc =
+    employee?.documents?.find((d) => d.type === "contract") ??
+    employeeDetail?.documents?.find((d) => d.type === "contract");
 
   function updateDocDate(docKey: ComplianceKey, field: "issuanceDate" | "expiryDate", value: string) {
     setForm((prev) => ({
@@ -387,6 +460,13 @@ export function EmployeeFormModal({
       }
     }
 
+    if (familyType === "family" && familyMembers.length > 0) {
+      const normalizedFamily = normalizeFamilyMembers(familyMembers);
+      for (const issue of validateFamilyMembers(normalizedFamily, form.gender)) {
+        allErrors[issue.path] = issue.message;
+      }
+    }
+
     if (Object.keys(allErrors).length > 0) {
       setErrors(allErrors);
       // Navigate to first tab that has errors
@@ -400,11 +480,20 @@ export function EmployeeFormModal({
         setTab("leave-balance");
       } else if (DOC_FIELDS.some((f) => allErrors[f])) {
         setTab("documents");
+      } else if (
+        Object.keys(allErrors).some((key) => key === "familyMembers" || key.startsWith("familyMembers."))
+      ) {
+        setTab("family");
       }
       return;
     }
 
-    await onSubmit(form, files, { familyType, familyMembers, familyBatakaFiles });
+    await onSubmit(form, files, {
+      familyType,
+      familyMembers: normalizeFamilyMembers(familyMembers),
+      familyBatakaFiles,
+      contractFile,
+    });
   }
 
   const personalErrorCount = countErrors(errors, PERSONAL_FIELDS);
@@ -470,6 +559,15 @@ export function EmployeeFormModal({
               value={form.email}
               onChange={(e) => updateField("email", e.target.value)}
               error={errors.email}
+            />
+          </div>
+          <div>
+            <Label>Gender *</Label>
+            <Select
+              value={form.gender}
+              onChange={(e) => updateGender(e.target.value as EmployeeGender)}
+              options={GENDER_OPTIONS}
+              error={errors.gender}
             />
           </div>
           <div>
@@ -680,6 +778,26 @@ export function EmployeeFormModal({
               onChange={(e) => updateField("contractEndDate", e.target.value)}
             />
           </div>
+          <div className="sm:col-span-2">
+            <Label>Employment Contract</Label>
+            <p className="mb-2 text-xs text-muted-foreground">Optional — upload the signed employment contract</p>
+            {existingContractDoc?.fileUrl && !contractFile ? (
+              <Button
+                type="button"
+                variant="secondary"
+                className="mb-3"
+                onClick={() => setViewerDoc(existingContractDoc)}
+              >
+                <Eye className="mr-2 h-4 w-4" />
+                View current contract
+              </Button>
+            ) : null}
+            <FileUpload
+              accept=".pdf,.png,.jpg,.jpeg,.webp"
+              label={contractFile ? contractFile.name : "Upload contract document (optional)"}
+              onFileSelect={setContractFile}
+            />
+          </div>
         </div>
       ) : null}
 
@@ -719,7 +837,7 @@ export function EmployeeFormModal({
                 <p className="text-sm font-medium text-foreground">Annual leave allocation</p>
                 <p className="text-xs text-muted-foreground">
                   Set the total leave days for this employee. Used days are tracked automatically when
-                  leave is approved.
+                  leave is approved. Maternity and paternity balances depend on gender.
                 </p>
               </div>
             </div>
@@ -752,16 +870,7 @@ export function EmployeeFormModal({
                 </tr>
               </thead>
               <tbody>
-                {(
-                  [
-                    ["annual", "annualTotal", "Annual Leave"] as const,
-                    ["sick", "sickTotal", "Sick Leave"] as const,
-                    ["emergency", "emergencyTotal", "Emergency Leave"] as const,
-                    ["unpaid", "unpaidTotal", "Unpaid Leave"] as const,
-                    ["maternity", "maternityTotal", "Maternity Leave"] as const,
-                    ["paternity", "paternityTotal", "Paternity Leave"] as const,
-                  ] as const
-                ).map(([usedKey, totalKey, label]) => {
+                {leaveBalanceRowsForGender(form.gender).map(([usedKey, totalKey, label]) => {
                   const used = form.leaveBalanceUsed?.[usedKey] ?? 0;
                   const total = Number(form.leaveBalance[totalKey]);
                   const remaining = Math.max(0, total - used);
@@ -814,9 +923,11 @@ export function EmployeeFormModal({
       {/* ── Family ── */}
       {tab === "family" ? (
         <FamilyTab
+          employeeGender={form.gender}
           familyType={familyType}
           familyMembers={familyMembers}
           focusFamilyMemberId={focusFamilyMemberId}
+          familyErrors={errors}
           onToggleType={(t) => setFamilyType(t)}
           onUpdate={setFamilyMembers}
           familyBatakaFiles={familyBatakaFiles}
@@ -1232,7 +1343,7 @@ function LegacyDocUpload({ employee, onUploadDocument }: LegacyDocUploadProps) {
             <span className="capitalize">{doc.type.replace(/_/g, " ")}</span>
             {doc.expiryDate ? (
               <span className="text-muted-foreground">
-                Expires {new Date(doc.expiryDate).toLocaleDateString()}
+                Expires {formatDate(doc.expiryDate)}
               </span>
             ) : null}
           </div>
@@ -1245,31 +1356,33 @@ function LegacyDocUpload({ employee, onUploadDocument }: LegacyDocUploadProps) {
 // FamilyTab
 // ---------------------------------------------------------------------------
 
-const RELATIONSHIP_OPTIONS: { value: FamilyRelationship; label: string }[] = [
-  { value: "spouse", label: "Spouse" },
-  { value: "son", label: "Son" },
-  { value: "daughter", label: "Daughter" },
-  { value: "parents", label: "Parents" },
-];
-
 function FamilyTab({
+  employeeGender,
   familyType,
   familyMembers,
   focusFamilyMemberId,
+  familyErrors,
   onToggleType,
   onUpdate,
   familyBatakaFiles,
   onUpdateBatakaFile,
 }: {
+  employeeGender?: EmployeeGender | "";
   familyType: "individual" | "family";
   familyMembers: FamilyMember[];
   focusFamilyMemberId?: string;
+  familyErrors?: Record<string, string>;
   onToggleType: (t: "individual" | "family") => void;
   onUpdate: (members: FamilyMember[]) => void;
   familyBatakaFiles: Map<number, File>;
   onUpdateBatakaFile: (idx: number, file: File | null) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set([0]));
+  const spouseCount = countFamilyRelationship(familyMembers, "spouse");
+  const motherCount = countFamilyRelationship(familyMembers, "mother");
+  const fatherCount = countFamilyRelationship(familyMembers, "father");
+  const maxSpouses = maxSpousesForGender(employeeGender);
+  const familyLimitError = familyErrors?.familyMembers;
 
   useEffect(() => {
     if (!focusFamilyMemberId || !familyMembers.length) return;
@@ -1284,7 +1397,8 @@ function FamilyTab({
   }, [focusFamilyMemberId, familyMembers]);
 
   function addMember() {
-    const next = [...familyMembers, { name: "", relationship: "spouse" as FamilyRelationship }];
+    const relationship = defaultRelationshipForNewMember(familyMembers, employeeGender);
+    const next = [...familyMembers, { name: "", relationship }];
     onUpdate(next);
     setExpanded((s) => new Set([...s, next.length - 1]));
   }
@@ -1299,6 +1413,12 @@ function FamilyTab({
   }
 
   function updateMember(idx: number, patch: Partial<FamilyMember>) {
+    if (
+      patch.relationship &&
+      !canSetFamilyRelationship(familyMembers, idx, patch.relationship, employeeGender)
+    ) {
+      return;
+    }
     onUpdate(familyMembers.map((m, i) => (i === idx ? { ...m, ...patch } : m)));
   }
 
@@ -1337,8 +1457,27 @@ function FamilyTab({
 
       {familyType === "family" ? (
         <div className="space-y-3">
+          <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+            <p>{familyLimitsHint(employeeGender)}</p>
+            {maxSpouses > 0 ? (
+              <p className="mt-1">
+                Spouses: {spouseCount}/{maxSpouses} · Father: {fatherCount}/1 · Mother: {motherCount}/1
+              </p>
+            ) : (
+              <p className="mt-1">Father: {fatherCount}/1 · Mother: {motherCount}/1</p>
+            )}
+          </div>
+
+          {familyLimitError ? (
+            <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+              <p className="text-sm text-destructive">{familyLimitError}</p>
+            </div>
+          ) : null}
+
           {familyMembers.map((member, idx) => {
             const isOpen = expanded.has(idx);
+            const nameError = familyErrors?.[`familyMembers.${idx}.name`];
             return (
               <div key={idx} id={`family-member-${idx}`} className="rounded-xl border border-border bg-card">
                 {/* Collapsible header */}
@@ -1358,7 +1497,9 @@ function FamilyTab({
                     <span className="text-sm font-medium">
                       {member.name || `Family Member ${idx + 1}`}
                       {member.relationship ? (
-                        <span className="ml-2 text-xs text-muted-foreground capitalize">({member.relationship})</span>
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          ({getFamilyRelationshipLabel(member.relationship)})
+                        </span>
                       ) : null}
                     </span>
                     <span className="ml-auto text-xs text-muted-foreground">{isOpen ? "▲" : "▼"}</span>
@@ -1380,14 +1521,17 @@ function FamilyTab({
                         value={member.name}
                         onChange={(e) => updateMember(idx, { name: e.target.value })}
                         placeholder="Full name"
+                        error={nameError}
                       />
                     </div>
                     <div>
                       <Label>Relationship *</Label>
                       <Select
                         value={member.relationship}
-                        onChange={(e) => updateMember(idx, { relationship: e.target.value as FamilyRelationship })}
-                        options={RELATIONSHIP_OPTIONS}
+                        onChange={(e) =>
+                          updateMember(idx, { relationship: e.target.value as FamilyRelationship })
+                        }
+                        options={getRelationshipOptionsForMember(familyMembers, idx, employeeGender)}
                       />
                     </div>
 
@@ -1511,6 +1655,7 @@ export function formToPayload(
     firstName: form.firstName,
     lastName: form.lastName,
     email: form.email,
+    gender: form.gender,
     phone: form.phone || undefined,
     address: form.address || undefined,
     emergencyContact: form.emergencyContactName
@@ -1545,8 +1690,16 @@ export function formToPayload(
       sick: { total: Number(form.leaveBalance.sickTotal) },
       emergency: { total: Number(form.leaveBalance.emergencyTotal) },
       unpaid: { total: Number(form.leaveBalance.unpaidTotal) },
-      maternity: { total: Number(form.leaveBalance.maternityTotal) },
-      paternity: { total: Number(form.leaveBalance.paternityTotal) },
+      maternity: {
+        total: maternityLeaveForGender(form.gender)
+          ? Number(form.leaveBalance.maternityTotal)
+          : 0,
+      },
+      paternity: {
+        total: paternityLeaveForGender(form.gender)
+          ? Number(form.leaveBalance.paternityTotal)
+          : 0,
+      },
     },
   };
 }

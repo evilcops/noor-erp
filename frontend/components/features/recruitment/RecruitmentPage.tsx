@@ -19,6 +19,7 @@ import { useAuth, useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { companyApi } from "@/lib/api/companies";
 import { recruitmentApi } from "@/lib/api/recruitment";
+import { formatDate } from "@/lib/date";
 import { getAccessToken } from "@/lib/api/token";
 import { cn } from "@/lib/utils";
 import { FileUpload } from "@/components/common/FileUpload";
@@ -61,16 +62,6 @@ const emptyFeedbackForm = {
   rating: "3",
   feedback: "",
 };
-
-function formatInterviewDate(value?: string) {
-  if (!value) return "—";
-  return new Date(value).toLocaleDateString(undefined, {
-    weekday: "short",
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
 
 export function RecruitmentPage() {
   const { user, isLoading: authLoading } = useAuth();
@@ -284,13 +275,13 @@ export function RecruitmentPage() {
       header: "Interview",
       cell: (r) =>
         r.interviewSchedule?.date
-          ? `${formatInterviewDate(r.interviewSchedule.date)} ${r.interviewSchedule.time ?? ""}`
+          ? `${formatDate(r.interviewSchedule.date)} ${r.interviewSchedule.time ?? ""}`
           : "—",
     },
     {
       key: "date",
       header: "Applied",
-      cell: (r) => (r.createdAt ? new Date(r.createdAt).toLocaleDateString() : "—"),
+      cell: (r) => (r.createdAt ? formatDate(r.createdAt) : "—"),
     },
     {
       key: "actions",
@@ -599,7 +590,7 @@ export function RecruitmentPage() {
                   </p>
                   <p>
                     <span className="text-muted-foreground">Applied:</span>{" "}
-                    {new Date(selected.createdAt).toLocaleDateString()}
+                    {formatDate(selected.createdAt)}
                   </p>
                 </div>
 
@@ -652,7 +643,7 @@ export function RecruitmentPage() {
                 {selected.interviewSchedule?.date ? (
                   <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
                     <p className="font-medium">Current schedule</p>
-                    <p>Date: {formatInterviewDate(selected.interviewSchedule.date)}</p>
+                    <p>Date: {formatDate(selected.interviewSchedule.date)}</p>
                     <p>Time: {selected.interviewSchedule.time ?? "—"}</p>
                     <p className="capitalize">Mode: {selected.interviewSchedule.mode ?? "—"}</p>
                     {selected.interviewSchedule.meetingLink ? (

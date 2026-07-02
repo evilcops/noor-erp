@@ -23,3 +23,27 @@ export function leaveTypeRequiresDocument(type: string): boolean {
 
 export const DEFAULT_PATERNITY_LEAVE_DAYS = 3;
 export const DEFAULT_MATERNITY_LEAVE_DAYS = 50;
+
+export type EmployeeGender = "male" | "female" | "other";
+
+export function maternityLeaveForGender(gender?: string | null): boolean {
+  return gender === "female";
+}
+
+export function paternityLeaveForGender(gender?: string | null): boolean {
+  return gender === "male";
+}
+
+export function leaveBalanceTypesForGender(gender?: string | null): LeaveBalanceType[] {
+  return LEAVE_BALANCE_TYPES.filter((type) => {
+    if (type === "maternity") return maternityLeaveForGender(gender);
+    if (type === "paternity") return paternityLeaveForGender(gender);
+    return true;
+  });
+}
+
+export function isLeaveTypeAllowedForGender(type: string, gender?: string | null): boolean {
+  if (type === "maternity") return maternityLeaveForGender(gender);
+  if (type === "paternity") return paternityLeaveForGender(gender);
+  return true;
+}

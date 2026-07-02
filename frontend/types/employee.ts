@@ -1,4 +1,5 @@
 export type EmploymentType = "full_time" | "part_time" | "contract" | "intern";
+export type EmployeeGender = "male" | "female" | "other";
 export type EmployeeStatus =
   | "active"
   | "on_leave"
@@ -71,6 +72,7 @@ export interface Employee {
   firstName: string;
   lastName: string;
   email: string;
+  gender?: EmployeeGender;
   phone?: string;
   address?: string;
   emergencyContact?: {
@@ -127,6 +129,7 @@ export interface CreateEmployeeInput {
   firstName: string;
   lastName: string;
   email: string;
+  gender?: EmployeeGender;
   phone?: string;
   address?: string;
   emergencyContact?: {
@@ -154,7 +157,7 @@ export type UpdateEmployeeInput = Partial<Omit<CreateEmployeeInput, "companyId" 
   leaveBalance?: EmployeeLeaveBalanceInput;
 };
 
-export type FamilyRelationship = "spouse" | "son" | "daughter" | "parents";
+export type FamilyRelationship = "spouse" | "son" | "daughter" | "mother" | "father";
 
 export interface FamilyMemberDocument {
   issueDate?: string;

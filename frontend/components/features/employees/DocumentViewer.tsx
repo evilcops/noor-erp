@@ -5,6 +5,7 @@ import { Download, FileText, X } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { getAccessToken } from "@/lib/api/token";
+import { formatDate } from "@/lib/date";
 import type { EmployeeDocument } from "@/types/employee";
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
@@ -93,16 +94,16 @@ export function DocumentViewer({ doc, open, onOpenChange }: DocumentViewerProps)
       open={open}
       onOpenChange={onOpenChange}
       title={getDocLabel(doc.type)}
-      description={doc.expiryDate ? `Expires ${new Date(doc.expiryDate).toLocaleDateString()}` : undefined}
+      description={doc.expiryDate ? `Expires ${formatDate(doc.expiryDate)}` : undefined}
       size="xl"
       footer={
         <div className="flex w-full items-center justify-between">
           <div className="space-y-0.5 text-xs text-muted-foreground">
             {doc.issuanceDate ? (
-              <p>Issued: {new Date(doc.issuanceDate).toLocaleDateString()}</p>
+              <p>Issued: {formatDate(doc.issuanceDate)}</p>
             ) : null}
             {doc.expiryDate ? (
-              <p>Expires: {new Date(doc.expiryDate).toLocaleDateString()}</p>
+              <p>Expires: {formatDate(doc.expiryDate)}</p>
             ) : null}
           </div>
           <div className="flex gap-2">

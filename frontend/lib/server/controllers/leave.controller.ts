@@ -24,7 +24,7 @@ import {
   sendSuccess,
 } from "../utils/apiResponse";
 import { AppError } from "../utils/AppError";
-import { DEFAULT_MATERNITY_LEAVE_DAYS, DEFAULT_PATERNITY_LEAVE_DAYS, LEAVE_TYPES_REQUIRING_DOCUMENT } from "../../../lib/leave/constants";
+import { DEFAULT_MATERNITY_LEAVE_DAYS, DEFAULT_PATERNITY_LEAVE_DAYS, LEAVE_TYPES_REQUIRING_DOCUMENT, isLeaveTypeAllowedForGender } from "../../../lib/leave/constants";
 
 const UPLOAD_DIR = path.join(process.cwd(), ".data", "uploads");
 
@@ -73,6 +73,16 @@ function resolveTargetEmployeeId(req: Request): string {
 
 export async function requestLeave(req: Request, res: Response) {
   const employee = await getEmployeeById(req, resolveTargetEmployeeId(req));
+
+  if (!isLeaveTypeAllowedForGender(req.body.type, employee.gender)) {
+    throw new AppError(
+      "BAD_REQUEST",
+      req.body.type === "maternity"
+        ? "Maternity leave is only available for female employees"
+        : "Paternity leave is only available for male employees",
+      400
+    );
+  }
 
   const startDate = new Date(req.body.startDate);
   const endDate = new Date(req.body.endDate);

@@ -15,6 +15,7 @@ import { Tabs } from "@/components/ui/Tabs";
 import { useAuth } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { performanceApi, type PerformanceReview } from "@/lib/api/performance";
+import { formatDate } from "@/lib/date";
 import { getEmployeeLabel, safeArray } from "@/lib/format";
 
 function toReviewForm(review: PerformanceReview) {
@@ -149,7 +150,7 @@ export function PerformancePage() {
     {
       key: "date",
       header: "Updated",
-      cell: (r) => (r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : "—"),
+      cell: (r) => (r.updatedAt ? formatDate(r.updatedAt) : "—"),
     },
     {
       key: "actions",

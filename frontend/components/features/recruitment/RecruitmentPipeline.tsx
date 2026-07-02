@@ -2,6 +2,7 @@
 
 import { CalendarClock, Mail, Star, Video } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/date";
 import type { Candidate, CandidateStatus } from "@/types/recruitment";
 
 const STAGES: {
@@ -87,10 +88,7 @@ function initials(name: string) {
 
 function formatInterviewDate(value?: string) {
   if (!value) return "";
-  return new Date(value).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
+  return formatDate(value);
 }
 
 function CandidateCard({

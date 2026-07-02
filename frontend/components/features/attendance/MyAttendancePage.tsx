@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
 import { useAuth } from "@/hooks";
 import { attendanceApi, type AttendanceRecord } from "@/lib/api/attendance";
+import { formatDate } from "@/lib/date";
 
 function monthRange() {
   const now = new Date();
@@ -114,7 +115,7 @@ export function MyAttendancePage() {
 
   const columns: Column<AttendanceRecord>[] = useMemo(
     () => [
-      { key: "date", header: "Date", cell: (r) => new Date(r.date).toLocaleDateString() },
+      { key: "date", header: "Date", cell: (r) => formatDate(r.date) },
       {
         key: "in",
         header: "Check In",
@@ -180,7 +181,7 @@ export function MyAttendancePage() {
         <div className="rounded-xl border border-border bg-card p-6 lg:col-span-2">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">Today — {new Date().toLocaleDateString()}</p>
+              <p className="text-sm text-muted-foreground">Today — {formatDate(new Date())}</p>
               <p className="mt-1 text-2xl font-semibold text-foreground">
                 {checkedOut
                   ? "Day complete"

@@ -1,7 +1,7 @@
 import mongoose, { Schema, type Document, type Model } from "mongoose";
 import { softDeletePlugin } from "./plugins/softDelete";
 
-export type FamilyRelationship = "spouse" | "son" | "daughter" | "parents";
+export type FamilyRelationship = "spouse" | "son" | "daughter" | "mother" | "father" | "parents";
 
 export interface IFamilyMemberDocument {
   issueDate?: Date;
@@ -62,6 +62,7 @@ export interface IEmployee extends Document {
   department?: string;
   designation?: string;
   employmentType: "full_time" | "part_time" | "contract" | "intern";
+  gender?: "male" | "female" | "other";
   joiningDate?: Date;
   contractStartDate?: Date;
   contractEndDate?: Date;
@@ -97,6 +98,7 @@ const employeeSchema = new Schema<IEmployee>(
     },
     department: String,
     designation: String,
+    gender: { type: String, enum: ["male", "female", "other"] },
     employmentType: {
       type: String,
       enum: ["full_time", "part_time", "contract", "intern"],
@@ -119,7 +121,7 @@ const employeeSchema = new Schema<IEmployee>(
         profilePicture: String,
         relationship: {
           type: String,
-          enum: ["spouse", "son", "daughter", "parents"],
+          enum: ["spouse", "son", "daughter", "mother", "father", "parents"],
           required: true,
         },
         bataka: {
@@ -175,5 +177,9 @@ const employeeSchema = new Schema<IEmployee>(
 employeeSchema.index({ companyId: 1, branchId: 1, status: 1 });
 employeeSchema.plugin(softDeletePlugin);
 
-export const Employee: Model<IEmployee> =
-  mongoose.models.Employee ?? mongoose.model<IEmployee>("Employee", employeeSchema);
+// Re-register when schema changes (Next.js dev HMR keeps a stale cached model).
+if (mongoose.models.Employee) {
+  mongoose.deleteModel("Employee");
+}
+
+export const Employee: Model<IEmployee> = mongoose.model<IEmployee>("Employee", employeeSchema);

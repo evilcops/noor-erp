@@ -19,6 +19,7 @@ import { companyApi, type Company } from "@/lib/api/companies";
 import { businessDocApi } from "@/lib/api/businessDocuments";
 import { getAccessToken } from "@/lib/api/token";
 import type { BusinessDocument } from "@/types/documents";
+import { formatDate } from "@/lib/date";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -33,11 +34,6 @@ const BIZ_DOC_LABELS: Record<string, string> = {
   chamber_of_commerce: "Chamber of Commerce",
   custom: "Custom Document",
 };
-
-function fmtDate(d?: string) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-}
 
 function daysLeft(expiry?: string): { label: string; cls: string } | null {
   if (!expiry) return null;
@@ -350,9 +346,9 @@ function BusinessDocumentsPanel({ companyId, companyName, canEdit, onClose, init
                       )}
                     </div>
                     <div className="mt-1.5 flex flex-wrap gap-x-6 text-xs text-muted-foreground">
-                      {doc.startDate ? <span>Start: {fmtDate(doc.startDate)}</span> : null}
+                      {doc.startDate ? <span>Start: {formatDate(doc.startDate)}</span> : null}
                       {doc.expiryDate ? (
-                        <span className={expiry?.cls ?? ""}>Expires: {fmtDate(doc.expiryDate)}{expiry ? ` · ${expiry.label}` : ""}</span>
+                        <span className={expiry?.cls ?? ""}>Expires: {formatDate(doc.expiryDate)}{expiry ? ` · ${expiry.label}` : ""}</span>
                       ) : <span>No expiry set</span>}
                     </div>
                     {doc.notes ? <p className="mt-1 text-xs text-muted-foreground">{doc.notes}</p> : null}

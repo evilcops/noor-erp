@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Calendar, Eye, Plus, X } from "lucide-react";
 import { toast } from "sonner";
@@ -16,9 +16,12 @@ import { Label } from "@/components/ui/Label";
 import { Select } from "@/components/ui/Select";
 import { LeaveAttachmentViewer } from "@/components/features/leave/LeaveAttachmentViewer";
 import { useAuth } from "@/hooks";
+import { employeeApi } from "@/lib/api/employees";
 import { leaveApi, type LeaveRequest } from "@/lib/api/leave";
+import { formatDateRange } from "@/lib/date";
 import {
-  LEAVE_BALANCE_TYPES,
+  isLeaveTypeAllowedForGender,
+  leaveBalanceTypesForGender,
   leaveTypeRequiresDocument,
   type LeaveBalanceType,
 } from "@/lib/leave/constants";
@@ -69,7 +72,32 @@ export function MyLeavePage() {
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [attachmentError, setAttachmentError] = useState("");
 
+  const { data: myEmployee } = useQuery({
+    queryKey: ["my-employee", user?.employeeId],
+    queryFn: () => employeeApi.getById(user!.employeeId!),
+    enabled: linked,
+  });
+
+  const employeeGender = myEmployee?.gender;
+  const availableLeaveTypes = useMemo(
+    () => LEAVE_TYPES.filter((t) => isLeaveTypeAllowedForGender(t.value, employeeGender)),
+    [employeeGender]
+  );
+  const visibleBalanceTypes = useMemo(
+    () => leaveBalanceTypesForGender(employeeGender),
+    [employeeGender]
+  );
+
   const requiresDocument = leaveTypeRequiresDocument(form.type);
+
+  useEffect(() => {
+    if (!isLeaveTypeAllowedForGender(form.type, employeeGender)) {
+      setForm((prev) => ({
+        ...prev,
+        type: availableLeaveTypes[0]?.value ?? "annual",
+      }));
+    }
+  }, [employeeGender, availableLeaveTypes, form.type]);
 
   const { data: balance, isLoading: balanceLoading } = useQuery({
     queryKey: ["my-leave-balance"],
@@ -141,8 +169,7 @@ export function MyLeavePage() {
       {
         key: "dates",
         header: "Dates",
-        cell: (r) =>
-          `${new Date(r.startDate).toLocaleDateString()} – ${new Date(r.endDate).toLocaleDateString()}`,
+      cell: (r) => formatDateRange(r.startDate, r.endDate),
       },
       { key: "days", header: "Days", cell: (r) => r.totalDays },
       { key: "status", header: "Status", cell: (r) => <StatusBadge status={r.status} /> },
@@ -253,7 +280,7 @@ export function MyLeavePage() {
           <p className="text-sm text-muted-foreground">Loading balance...</p>
         ) : balance ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            {LEAVE_BALANCE_TYPES.map((type: LeaveBalanceType) => (
+            {visibleBalanceTypes.map((type: LeaveBalanceType) => (
               <div key={type} className="rounded-lg bg-muted/40 px-4 py-3">
                 <p className="text-xs font-medium capitalize text-muted-foreground">{type} leave</p>
                 <div className="mt-2 space-y-1">
@@ -320,7 +347,7 @@ export function MyLeavePage() {
                 setAttachmentFile(null);
                 setAttachmentError("");
               }}
-              options={LEAVE_TYPES}
+              options={availableLeaveTypes}
             />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
