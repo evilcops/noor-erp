@@ -6,19 +6,35 @@ const ROLE_PERMISSIONS: Record<ApiUser["role"], string[]> = {
   business_owner: [
     "dashboard:view",
     "company:view", "company:edit", "branch:*", "employee:*", "attendance:*",
-    "leave:*", "recruitment:*", "performance:*", "notification:*", "report:*", "user:*",
+    "leave:*", "recruitment:*", "performance:*",
+    "product:*", "supplier:*", "purchase:*", "inventory:*", "stock_transfer:*", "customer:*",
+    "notification:*", "report:*", "user:*",
   ],
   branch_manager: [
     "dashboard:view",
     "branch:view", "employee:view", "employee:edit", "attendance:*",
     "leave:view", "leave:approve", "recruitment:view", "recruitment:edit",
-    "performance:view", "performance:edit", "notification:view", "report:view", "report:export",
+    "performance:view", "performance:edit",
+    "product:view", "supplier:view", "purchase:view", "purchase:create", "purchase:approve",
+    "inventory:view", "inventory:edit", "stock_transfer:view", "stock_transfer:create", "stock_transfer:approve",
+    "customer:view", "customer:create",
+    "notification:view", "report:view", "report:export",
   ],
   hr_manager: [
     "dashboard:view",
     "company:view", "branch:view", "employee:*", "attendance:view", "attendance:create",
     "attendance:edit", "attendance:delete", "attendance:approve",
     "leave:*", "recruitment:*", "performance:*", "notification:view", "report:*",
+  ],
+  inventory_manager: [
+    "dashboard:view", "branch:view",
+    "product:*", "supplier:view", "purchase:view", "purchase:create", "purchase:approve",
+    "inventory:*", "stock_transfer:*", "customer:*", "notification:view", "report:view", "report:export",
+  ],
+  procurement_manager: [
+    "dashboard:view", "branch:view",
+    "product:view", "supplier:*", "purchase:*",
+    "inventory:view", "stock_transfer:view", "customer:view", "customer:create", "notification:view", "report:view", "report:export",
   ],
   employee: [
     "dashboard:view",
@@ -41,12 +57,20 @@ export function hasPermission(user: ApiUser | null, permission: string): boolean
 
 export function isManager(user: ApiUser | null): boolean {
   if (!user) return false;
-  return ["super_admin", "business_owner", "branch_manager", "hr_manager"].includes(user.role);
+  return [
+    "super_admin", "business_owner", "branch_manager", "hr_manager",
+    "inventory_manager", "procurement_manager",
+  ].includes(user.role);
 }
 
 export function isHrOrAbove(user: ApiUser | null): boolean {
   if (!user) return false;
   return ["super_admin", "business_owner", "hr_manager"].includes(user.role);
+}
+
+export function isSupplyRole(user: ApiUser | null): boolean {
+  if (!user) return false;
+  return ["super_admin", "business_owner", "inventory_manager", "procurement_manager", "branch_manager"].includes(user.role);
 }
 
 export function isEmployeeRole(user: ApiUser | null): boolean {

@@ -9,6 +9,10 @@ import { Leave } from "../models/Leave.model";
 import { LeaveBalance } from "../models/LeaveBalance.model";
 import { Notification } from "../models/Notification.model";
 import { Recruitment } from "../models/Recruitment.model";
+import { Product } from "../models/Product.model";
+import { Supplier } from "../models/Supplier.model";
+import { StockLevel } from "../models/StockLevel.model";
+import { PurchaseOrder } from "../models/PurchaseOrder.model";
 import { logger } from "../utils/logger";
 const PASSWORD = "Password123!";
 
@@ -25,6 +29,10 @@ async function seed() {
     LeaveBalance.deleteMany({}),
     Notification.deleteMany({}),
     Recruitment.deleteMany({}),
+    Product.deleteMany({}),
+    Supplier.deleteMany({}),
+    StockLevel.deleteMany({}),
+    PurchaseOrder.deleteMany({}),
   ]);
 
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
@@ -241,6 +249,124 @@ async function seed() {
     }))
   );
 
+  // Phase 2 — Supply chain seed data (first company)
+  const mainCompany = companies[0];
+  const mainBranch = branches[0];
+  const secondBranch = branches[1];
+
+  const supplier = await Supplier.create({
+    companyId: mainCompany._id,
+    name: "Gulf Trading Supplies",
+    contactPerson: "Ahmed Al-Balushi",
+    phone: "+968 2411 0001",
+    email: "orders@gulftrading.om",
+    address: "Rusayl Industrial, Muscat",
+    country: "OM",
+    paymentTerms: "Net 30",
+    deliveryLeadTimeDays: 7,
+    rating: 4,
+    status: "active",
+    createdBy: superAdmin._id,
+  });
+
+  const productSamples = [
+    { name: "Premium Dates 500g", category: "Food", brand: "NOOR", purchaseCost: 1.5, sellingPrice: 2.5, reorderLevel: 20 },
+    { name: "Frankincense Resin 100g", category: "Wellness", brand: "Omani Gold", purchaseCost: 3.0, sellingPrice: 5.5, reorderLevel: 15 },
+    { name: "Traditional Khanjar Display", category: "Gifts", brand: "Heritage", purchaseCost: 25, sellingPrice: 45, reorderLevel: 5 },
+    { name: "Omani Honey 250ml", category: "Food", brand: "Mountain Bee", purchaseCost: 4.5, sellingPrice: 8.0, reorderLevel: 10 },
+    { name: "Pashmina Shawl", category: "Textiles", brand: "Silk Road", purchaseCost: 12, sellingPrice: 22, reorderLevel: 8 },
+  ];
+
+  const products = [];
+  for (let i = 0; i < productSamples.length; i++) {
+    const sample = productSamples[i];
+    const sku = `SKU-${String(i + 1).padStart(5, "0")}`;
+    const product = await Product.create({
+      companyId: mainCompany._id,
+      name: sample.name,
+      code: `PRD-${String(i + 1).padStart(5, "0")}`,
+      sku,
+      barcode: String(968000000001 + i),
+      qrCodeData: JSON.stringify({ type: "noor_product", sku }),
+      category: sample.category,
+      brand: sample.brand,
+      supplierId: supplier._id,
+      purchaseCost: sample.purchaseCost,
+      sellingPrice: sample.sellingPrice,
+      unitOfMeasure: "pcs",
+      minStockLevel: Math.floor(sample.reorderLevel / 2),
+      reorderLevel: sample.reorderLevel,
+      status: i === 4 ? "out_of_stock" : "active",
+      createdBy: superAdmin._id,
+    });
+    products.push(product);
+
+    await StockLevel.create({
+      companyId: mainCompany._id,
+      branchId: mainBranch._id,
+      productId: product._id,
+      openingStock: 50 - i * 8,
+      currentStock: i === 4 ? 0 : 50 - i * 8,
+      damagedStock: 0,
+      returnedStock: 0,
+      reorderLevel: sample.reorderLevel,
+      createdBy: superAdmin._id,
+    });
+
+    if (i < 3) {
+      await StockLevel.create({
+        companyId: mainCompany._id,
+        branchId: secondBranch._id,
+        productId: product._id,
+        openingStock: 20,
+        currentStock: 20 - i * 3,
+        damagedStock: 0,
+        returnedStock: 0,
+        reorderLevel: sample.reorderLevel,
+        createdBy: superAdmin._id,
+      });
+    }
+  }
+
+  supplier.productIds = products.map((p) => p._id);
+  await supplier.save();
+
+  await PurchaseOrder.create({
+    companyId: mainCompany._id,
+    branchId: mainBranch._id,
+    supplierId: supplier._id,
+    poNumber: `PO-${new Date().getFullYear()}-0001`,
+    status: "ordered",
+    items: [
+      { productId: products[0]._id, quantityOrdered: 50, quantityReceived: 0, unitCost: 1.5 },
+      { productId: products[1]._id, quantityOrdered: 30, quantityReceived: 0, unitCost: 3.0 },
+    ],
+    totalAmount: 50 * 1.5 + 30 * 3.0,
+    requestedBy: owners[0]._id,
+    approvedBy: owners[0]._id,
+    orderedAt: new Date(),
+    createdBy: owners[0]._id,
+  });
+
+  await Notification.insertMany([
+    {
+      userId: owners[0]._id,
+      companyId: mainCompany._id,
+      type: "low_stock",
+      title: "Low Stock Alert",
+      message: "Pashmina Shawl at NOOR Muscat HQ is low (0 remaining)",
+      isRead: false,
+    },
+    {
+      userId: owners[0]._id,
+      companyId: mainCompany._id,
+      type: "purchase_approval",
+      title: "Purchase Approval Needed",
+      message: "Review pending purchase requests",
+      isRead: false,
+    },
+  ]);
+
   logger.info("Seed completed successfully");
   console.log("\n--- NOOR ERP Seed Credentials ---");
   console.log(`Super Admin: admin@noor.om / ${PASSWORD}`);
@@ -251,6 +377,8 @@ async function seed() {
   console.log(`Employees:   ${employees.length}`);
   console.log(`Attendance:  ${10 * 7} records (10 employees × 7 days)`);
   console.log(`Leaves:      5 requests (pending / approved / rejected)`);
+  console.log(`Products:    ${products.length}`);
+  console.log(`Suppliers:   1`);
   console.log("--------------------------------\n");
 
   await disconnectDatabase();

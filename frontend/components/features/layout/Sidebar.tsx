@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { MAIN_NAV, SETTINGS_NAV, isNavActive } from "@/config/site";
+import { MAIN_NAV, SETTINGS_NAV, SUPPLY_NAV, isNavActive } from "@/config/site";
+import { MODULE_SIDEBAR_LABELS } from "@/config/modules";
+import { useErpModule } from "@/components/providers/ModuleProvider";
 import { useAuth } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { isEmployeeRole } from "@/lib/permissions";
@@ -20,13 +22,69 @@ function filterNav<T extends { permission?: string }>(
   return items.filter((item) => !item.permission || can(item.permission));
 }
 
+function NavSection({
+  items,
+  pathname,
+  collapsed,
+  employeeView,
+  onNavigate,
+  sectionLabel,
+}: {
+  items: typeof MAIN_NAV;
+  pathname: string;
+  collapsed: boolean;
+  employeeView: boolean;
+  onNavigate?: () => void;
+  sectionLabel: string;
+}) {
+  if (items.length === 0) return null;
+
+  return (
+    <div>
+      {!collapsed ? (
+        <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {sectionLabel}
+        </p>
+      ) : null}
+      <ul className="space-y-1">
+        {items.map((item) => {
+          const active = isNavActive(pathname, item.href);
+          const Icon = item.icon;
+          return (
+            <li key={item.href}>
+              <Link
+                href={item.href}
+                onClick={onNavigate}
+                title={collapsed ? item.title : undefined}
+                className={cn(
+                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                  active
+                    ? "bg-sidebar-active text-sidebar-active-foreground"
+                    : "text-sidebar-foreground hover:bg-muted hover:text-foreground",
+                  collapsed && "justify-center px-2"
+                )}
+              >
+                <Icon className={cn("h-[18px] w-[18px] shrink-0", active && "text-brand")} />
+                {!collapsed ? (
+                  <span>{employeeView && item.employeeTitle ? item.employeeTitle : item.title}</span>
+                ) : null}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 export function Sidebar({ onNavigate, collapsed = false }: SidebarProps) {
   const pathname = usePathname();
   const { user } = useAuth();
   const { can } = usePermissions();
+  const { activeModule } = useErpModule();
   const employeeView = isEmployeeRole(user);
 
-  const mainNav = filterNav(MAIN_NAV, can);
+  const moduleNav = filterNav(activeModule === "inventory" ? SUPPLY_NAV : MAIN_NAV, can);
   const settingsNav = filterNav(SETTINGS_NAV, can);
 
   return (
@@ -37,93 +95,37 @@ export function Sidebar({ onNavigate, collapsed = false }: SidebarProps) {
       )}
     >
       <div className={cn("flex h-16 items-center border-b border-border", collapsed ? "justify-center px-2" : "px-5")}>
-        <Link href="/" className="flex items-center gap-3" onClick={onNavigate}>
+        <Link href={activeModule === "inventory" ? "/supply" : "/"} className="flex items-center gap-3" onClick={onNavigate}>
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand text-sm font-bold text-brand-foreground">
             N
           </div>
           {!collapsed ? (
             <div>
               <p className="text-sm font-semibold text-foreground">NOOR ERP</p>
-              <p className="text-[11px] text-muted-foreground">People · Phase 1</p>
+              <p className="text-[11px] text-muted-foreground">{MODULE_SIDEBAR_LABELS[activeModule]}</p>
             </div>
           ) : null}
         </Link>
       </div>
 
       <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
-        {mainNav.length > 0 ? (
-          <div>
-            {!collapsed ? (
-              <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Main
-              </p>
-            ) : null}
-            <ul className="space-y-1">
-              {mainNav.map((item) => {
-                const active = isNavActive(pathname, item.href);
-                const Icon = item.icon;
-                return (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      onClick={onNavigate}
-                      title={collapsed ? item.title : undefined}
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                        active
-                          ? "bg-sidebar-active text-sidebar-active-foreground"
-                          : "text-sidebar-foreground hover:bg-muted hover:text-foreground",
-                        collapsed && "justify-center px-2"
-                      )}
-                    >
-                      <Icon className={cn("h-[18px] w-[18px] shrink-0", active && "text-brand")} />
-                      {!collapsed ? (
-                      <span>{employeeView && item.employeeTitle ? item.employeeTitle : item.title}</span>
-                    ) : null}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ) : null}
+        <NavSection
+          items={moduleNav}
+          pathname={pathname}
+          collapsed={collapsed}
+          employeeView={employeeView}
+          onNavigate={onNavigate}
+          sectionLabel={activeModule === "inventory" ? "Inventory" : "Main"}
+        />
 
-        {settingsNav.length > 0 ? (
-          <div>
-            {!collapsed ? (
-              <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Settings
-              </p>
-            ) : null}
-            <ul className="space-y-1">
-              {settingsNav.map((item) => {
-                const active = isNavActive(pathname, item.href);
-                const Icon = item.icon;
-                return (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      onClick={onNavigate}
-                      title={collapsed ? item.title : undefined}
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                        active
-                          ? "bg-sidebar-active text-sidebar-active-foreground"
-                          : "text-sidebar-foreground hover:bg-muted hover:text-foreground",
-                        collapsed && "justify-center px-2"
-                      )}
-                    >
-                      <Icon className={cn("h-[18px] w-[18px] shrink-0", active && "text-brand")} />
-                      {!collapsed ? (
-                      <span>{employeeView && item.employeeTitle ? item.employeeTitle : item.title}</span>
-                    ) : null}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ) : null}
+        <NavSection
+          items={settingsNav}
+          pathname={pathname}
+          collapsed={collapsed}
+          employeeView={employeeView}
+          onNavigate={onNavigate}
+          sectionLabel="Settings"
+        />
       </nav>
 
       {!collapsed ? (

@@ -3,6 +3,8 @@ export type UserRole =
   | "business_owner"
   | "branch_manager"
   | "hr_manager"
+  | "inventory_manager"
+  | "procurement_manager"
   | "employee";
 
 export type Resource =
@@ -14,6 +16,12 @@ export type Resource =
   | "leave"
   | "recruitment"
   | "performance"
+  | "product"
+  | "supplier"
+  | "purchase"
+  | "inventory"
+  | "stock_transfer"
+  | "customer"
   | "notification"
   | "report"
   | "audit"

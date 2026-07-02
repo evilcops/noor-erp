@@ -18,7 +18,7 @@ export async function systemInfo(_req: Request, res: Response) {
   return sendSuccess(res, {
     name: "NOOR ERP API",
     version: "1.0.0",
-    phase: "Phase 1 — NOOR People",
+    phase: "Phase 1 & 2 — NOOR People + Supply",
     nodeVersion: process.version,
     environment: process.env.NODE_ENV ?? "development",
     region: process.env.AWS_REGION ?? "me-south-1",

@@ -9,7 +9,11 @@ export interface INotification extends Document {
     | "attendance_late"
     | "document_expiry"
     | "performance_due"
-    | "recruitment_update";
+    | "recruitment_update"
+    | "low_stock"
+    | "purchase_approval"
+    | "stock_transfer"
+    | "stock_received";
   title: string;
   message: string;
   data?: Record<string, unknown>;
@@ -31,6 +35,10 @@ const notificationSchema = new Schema<INotification>(
         "document_expiry",
         "performance_due",
         "recruitment_update",
+        "low_stock",
+        "purchase_approval",
+        "stock_transfer",
+        "stock_received",
       ],
       required: true,
     },

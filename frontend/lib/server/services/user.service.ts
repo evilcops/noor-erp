@@ -7,10 +7,12 @@ import { assertPermission, buildTenantFilter } from "./permission.service";
 import { AppError } from "../utils/AppError";
 
 const MANAGEABLE_ROLES: Record<UserRole, UserRole[]> = {
-  super_admin: ["super_admin", "business_owner", "branch_manager", "hr_manager", "employee"],
-  business_owner: ["business_owner", "branch_manager", "hr_manager", "employee"],
+  super_admin: ["super_admin", "business_owner", "branch_manager", "hr_manager", "inventory_manager", "procurement_manager", "employee"],
+  business_owner: ["business_owner", "branch_manager", "hr_manager", "inventory_manager", "procurement_manager", "employee"],
   branch_manager: ["employee"],
   hr_manager: ["employee"],
+  inventory_manager: ["employee"],
+  procurement_manager: ["employee"],
   employee: [],
 };
 

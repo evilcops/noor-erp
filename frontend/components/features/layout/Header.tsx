@@ -2,6 +2,7 @@
 
 import { Menu, PanelLeftClose, PanelLeft } from "lucide-react";
 import { BranchSelector } from "@/components/features/layout/BranchSelector";
+import { ModuleTabs } from "@/components/features/layout/ModuleTabs";
 import { NotificationBell } from "@/components/common/NotificationBell";
 import { UserMenu } from "@/components/common/UserMenu";
 import { cn } from "@/lib/utils";
@@ -50,6 +51,7 @@ export function Header({
         <div className="sm:hidden">
           <BranchSelector compact />
         </div>
+        <ModuleTabs />
       </div>
 
       <div className="flex items-center gap-2">

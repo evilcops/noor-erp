@@ -3,10 +3,15 @@ import {
   Building2,
   Calendar,
   Clock,
+  Contact,
   GitBranch,
   Home,
+  Package,
   Settings,
   Shield,
+  ShoppingCart,
+  Truck,
+  Warehouse,
   // TrendingUp,
   Users,
   type LucideIcon,
@@ -38,6 +43,16 @@ export const MAIN_NAV: NavItem[] = [
   // { title: "Performance", href: "/performance", icon: TrendingUp, permission: "performance:view" },
 ];
 
+export const SUPPLY_NAV: NavItem[] = [
+  { title: "Supply Dashboard", href: "/supply", icon: Warehouse, permission: "inventory:view" },
+  { title: "Products", href: "/products", icon: Package, permission: "product:view" },
+  { title: "Inventory", href: "/inventory", icon: Package, permission: "inventory:view" },
+  { title: "Customers", href: "/customers", icon: Contact, permission: "customer:view" },
+  { title: "Suppliers", href: "/suppliers", icon: Truck, permission: "supplier:view" },
+  { title: "Purchase Orders", href: "/purchases", icon: ShoppingCart, permission: "purchase:view" },
+  { title: "Stock Transfers", href: "/stock-transfers", icon: GitBranch, permission: "stock_transfer:view" },
+];
+
 export const SETTINGS_NAV: NavItem[] = [
   { title: "Company Settings", href: "/settings/company", icon: Building2, permission: "company:view" },
   { title: "Branches", href: "/settings/branches", icon: GitBranch, permission: "branch:view" },
@@ -52,6 +67,13 @@ export const ROUTE_PERMISSIONS: { prefix: string; permission: string }[] = [
   { prefix: "/leave", permission: "leave:view" },
   { prefix: "/recruitment", permission: "recruitment:view" },
   { prefix: "/performance", permission: "performance:view" },
+  { prefix: "/supply", permission: "inventory:view" },
+  { prefix: "/products", permission: "product:view" },
+  { prefix: "/inventory", permission: "inventory:view" },
+  { prefix: "/customers", permission: "customer:view" },
+  { prefix: "/suppliers", permission: "supplier:view" },
+  { prefix: "/purchases", permission: "purchase:view" },
+  { prefix: "/stock-transfers", permission: "stock_transfer:view" },
   { prefix: "/documents", permission: "employee:view" },
   { prefix: "/notifications", permission: "notification:view" },
   { prefix: "/settings/company", permission: "company:view" },

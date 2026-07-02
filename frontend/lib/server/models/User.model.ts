@@ -31,7 +31,15 @@ const userSchema = new Schema<IUser>(
     phone: String,
     role: {
       type: String,
-      enum: ["super_admin", "business_owner", "branch_manager", "hr_manager", "employee"],
+      enum: [
+        "super_admin",
+        "business_owner",
+        "branch_manager",
+        "hr_manager",
+        "inventory_manager",
+        "procurement_manager",
+        "employee",
+      ],
       required: true,
     },
     companyId: { type: Schema.Types.ObjectId, ref: "Company", index: true },

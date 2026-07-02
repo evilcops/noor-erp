@@ -5,12 +5,14 @@ import { RoutePermissionGuard } from "@/components/common/RoutePermissionGuard";
 import { Header } from "@/components/features/layout/Header";
 import { MobileSidebar } from "@/components/features/layout/MobileSidebar";
 import { Sidebar } from "@/components/features/layout/Sidebar";
+import { ModuleProvider } from "@/components/providers/ModuleProvider";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
   return (
+    <ModuleProvider>
     <div className="flex min-h-screen bg-background">
       <div className="hidden lg:block">
         <Sidebar collapsed={collapsed} />
@@ -38,5 +40,6 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         </footer>
       </div>
     </div>
+    </ModuleProvider>
   );
 }
