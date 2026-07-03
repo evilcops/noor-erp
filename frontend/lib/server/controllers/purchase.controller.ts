@@ -239,3 +239,36 @@ export async function cancelPurchase(req: Request, res: Response) {
   await po.save();
   return sendSuccess(res, po);
 }
+
+export async function sendPurchaseToSupplier(req: Request, res: Response) {
+  const tenant = buildTenantFilter(req.user!);
+  const po = await PurchaseOrder.findOne({ _id: req.params.id, ...tenant, deletedAt: null })
+    .populate("supplierId", "name contactPerson phone email")
+    .populate("branchId", "name code")
+    .populate("items.productId", "name sku")
+    .lean();
+
+  if (!po) throw new AppError("NOT_FOUND", "Purchase order not found", 404);
+
+  const supplier = po.supplierId as {
+    _id?: string;
+    name?: string;
+    email?: string;
+    contactPerson?: string;
+  } | null;
+
+  if (!supplier?.email) {
+    throw new AppError("BAD_REQUEST", "Supplier does not have an email address on file", 400);
+  }
+
+  const { sendPurchaseOrderToSupplier } = await import("../services/purchase-email.service");
+  await sendPurchaseOrderToSupplier(po, {
+    name: supplier.name ?? "Supplier",
+    email: supplier.email,
+  });
+
+  return sendSuccess(res, {
+    message: `Purchase order sent to ${supplier.email}`,
+    sentTo: supplier.email,
+  });
+}

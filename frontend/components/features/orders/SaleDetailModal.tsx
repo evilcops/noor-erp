@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Modal } from "@/components/ui/Modal";
-import { StatusBadge } from "@/components/common/StatusBadge";
+import { ReceiptActions } from "@/components/features/orders/ReceiptActions";
 import { salesApi } from "@/lib/api/customers";
 
 function refName(ref: string | { name?: string; sku?: string; firstName?: string; lastName?: string } | undefined) {
@@ -100,6 +100,8 @@ export function SaleDetailModal({ saleId, open, onOpenChange }: SaleDetailModalP
               <p className="text-sm">{sale.notes}</p>
             </div>
           ) : null}
+
+          <ReceiptActions sale={sale} />
         </div>
       )}
     </Modal>

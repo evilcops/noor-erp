@@ -15,7 +15,8 @@ import { useAuth, useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { customerApi, salesApi } from "@/lib/api/customers";
 import { inventoryApi } from "@/lib/api/inventory";
-import type { Customer } from "@/types/customer";
+import { SaleReceiptModal } from "@/components/features/orders/SaleReceiptModal";
+import type { Customer, Sale } from "@/types/customer";
 import type { StockLevel } from "@/types/inventory";
 
 const NEW_CUSTOMER_VALUE = "__new__";
@@ -54,6 +55,8 @@ export function InventoryPage() {
   const [sellForm, setSellForm] = useState(emptySellForm);
   const [customerSelection, setCustomerSelection] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
+  const [completedSale, setCompletedSale] = useState<Sale | null>(null);
+  const [receiptOpen, setReceiptOpen] = useState(false);
 
   const isSuperAdmin = user?.role === "super_admin";
   const companyId = user?.companyId ?? "";
@@ -130,10 +133,12 @@ export function InventoryPage() {
           : { customerId: customerSelection }),
         notes: sellForm.notes.trim() || undefined,
       }),
-    onSuccess: () => {
+    onSuccess: (sale) => {
       toast.success("Sale recorded");
       setSellOpen(false);
       resetSellForm();
+      setCompletedSale(sale);
+      setReceiptOpen(true);
       void qc.invalidateQueries({ queryKey: ["stock-levels"] });
       void qc.invalidateQueries({ queryKey: ["customers"] });
     },
@@ -299,6 +304,15 @@ export function InventoryPage() {
           <Button disabled={!reason || !qty || adjustMut.isPending} onClick={() => adjustMut.mutate()}>Apply</Button>
         </div>
       </Modal>
+
+      <SaleReceiptModal
+        sale={completedSale}
+        open={receiptOpen}
+        onOpenChange={(open) => {
+          setReceiptOpen(open);
+          if (!open) setCompletedSale(null);
+        }}
+      />
     </div>
   );
 }

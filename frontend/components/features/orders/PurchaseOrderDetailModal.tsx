@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Modal } from "@/components/ui/Modal";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import { ReceiptActions } from "@/components/features/orders/ReceiptActions";
 import { purchaseApi } from "@/lib/api/purchases";
 
 function refName(ref: string | { name?: string; sku?: string; contactPerson?: string } | undefined) {
@@ -124,6 +125,8 @@ export function PurchaseOrderDetailModal({ purchaseId, open, onOpenChange }: Pur
               <p className="text-sm">{po.notes}</p>
             </div>
           ) : null}
+
+          <ReceiptActions purchase={po} />
         </div>
       )}
     </Modal>

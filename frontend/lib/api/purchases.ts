@@ -34,4 +34,7 @@ export const purchaseApi = {
 
   cancel: (id: string) =>
     apiRequest<PurchaseOrder>(`/purchases/${id}/cancel`, { method: "POST" }),
+
+  sendToSupplier: (id: string) =>
+    apiRequest<{ message: string; sentTo: string }>(`/purchases/${id}/send-to-supplier`, { method: "POST" }),
 };

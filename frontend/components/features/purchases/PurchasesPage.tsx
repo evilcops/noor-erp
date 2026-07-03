@@ -19,6 +19,7 @@ import { purchaseApi } from "@/lib/api/purchases";
 import { supplierApi } from "@/lib/api/suppliers";
 import { productApi } from "@/lib/api/products";
 import { PurchasePipeline } from "@/components/features/purchases/PurchasePipeline";
+import { ReceiptActions } from "@/components/features/orders/ReceiptActions";
 import type { PurchaseOrder } from "@/types/purchase";
 
 function refName(ref: string | { name?: string } | undefined) {
@@ -135,10 +136,13 @@ export function PurchasesPage() {
 
   const createMut = useMutation({
     mutationFn: () => purchaseApi.create({ companyId, branchId, supplierId, items }),
-    onSuccess: () => {
+    onSuccess: async (created) => {
       toast.success("Purchase order created");
       setFormOpen(false);
       setItems([]);
+      const full = await purchaseApi.get(created._id);
+      setSelected(full);
+      setDetailOpen(true);
       void qc.invalidateQueries({ queryKey: ["purchases"] });
       void qc.invalidateQueries({ queryKey: ["purchases-pipeline"] });
       void qc.invalidateQueries({ queryKey: ["inventory-dashboard"] });
@@ -162,8 +166,8 @@ export function PurchasesPage() {
       }
       if (action === "cancel") return purchaseApi.cancel(selected._id);
     },
-    onSuccess: async () => {
-      toast.success("Purchase order updated");
+    onSuccess: async (_, action) => {
+      toast.success(action === "order" ? "Purchase order placed — receipt ready" : "Purchase order updated");
       if (selected) {
         const updated = await purchaseApi.get(selected._id);
         setSelected(updated);
@@ -328,6 +332,7 @@ export function PurchasesPage() {
                 );
               })}
             </div>
+            <ReceiptActions purchase={selected} className="border-t border-border pt-4" />
             <div className="flex flex-wrap gap-2">
               {(workflowActions[selected.status] ?? []).map((a) =>
                 can(a.permission) ? (
