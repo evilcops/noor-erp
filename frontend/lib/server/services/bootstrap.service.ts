@@ -109,7 +109,7 @@ export async function ensureDevAdmin(): Promise<void> {
 
   // Ensure the admin user is linked to a company so controllers can use req.user.companyId
   if (!user.companyId && company) {
-    user.companyId = company._id as typeof user.companyId;
+    user.companyId = company._id as unknown as typeof user.companyId;
     await user.save();
     logger.info(`Dev admin linked to company ${company.name}`);
   }

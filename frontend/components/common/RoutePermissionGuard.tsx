@@ -3,13 +3,15 @@
 import { ShieldX } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { getRoutePermission } from "@/config/site";
+import { getRoutePermissionRule, canAccessRoute } from "@/config/site";
+import { getDefaultHomePath } from "@/config/modules";
 import { useAuth } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
+import { isRiderRole } from "@/lib/permissions";
 
 export function RoutePermissionGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { isLoading } = useAuth();
+  const { user, isLoading } = useAuth();
   const { can } = usePermissions();
 
   if (isLoading) {
@@ -20,9 +22,10 @@ export function RoutePermissionGuard({ children }: { children: React.ReactNode }
     );
   }
 
-  const required = getRoutePermission(pathname);
-  if (required && !can(required)) {
-    return (
+  if (!canAccessRoute(pathname, can, user?.role)) {
+    const rule = getRoutePermissionRule(pathname);
+    if (rule) {
+      return (
       <div className="flex min-h-[50vh] flex-col items-center justify-center text-center">
         <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted">
           <ShieldX className="h-8 w-8 text-muted-foreground" />
@@ -33,13 +36,14 @@ export function RoutePermissionGuard({ children }: { children: React.ReactNode }
           believe this is a mistake.
         </p>
         <Link
-          href="/"
+          href={getDefaultHomePath(user?.role)}
           className="mt-6 inline-flex items-center justify-center rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:opacity-90"
         >
-          Go to Dashboard
+          {isRiderRole(user) ? "Go to My Deliveries" : "Go to Dashboard"}
         </Link>
       </div>
     );
+    }
   }
 
   return <>{children}</>;

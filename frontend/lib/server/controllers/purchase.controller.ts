@@ -1,5 +1,7 @@
 import type { Request, Response } from "express";
+import mongoose from "mongoose";
 import { PurchaseOrder } from "../models/PurchaseOrder.model";
+import { Product } from "../models/Product.model";
 import { GoodsReceivedNote } from "../models/GoodsReceivedNote.model";
 import {
   assertBranchAccess,
@@ -28,15 +30,36 @@ function calcTotal(items: { quantityOrdered: number; unitCost: number }[]) {
   return items.reduce((sum, i) => sum + i.quantityOrdered * i.unitCost, 0);
 }
 
+async function enrichPurchaseItems(
+  items: { productId: string; quantityOrdered: number; unitCost?: number; notes?: string }[]
+) {
+  return Promise.all(
+    items.map(async (item) => {
+      const product = await Product.findById(item.productId).select("purchaseCost sellingPrice");
+      const purchaseCost = product?.purchaseCost ?? item.unitCost ?? 0;
+      return {
+        ...item,
+        productId: new mongoose.Types.ObjectId(item.productId),
+        quantityReceived: 0,
+        unitCost: purchaseCost,
+        previousPurchaseCost: purchaseCost,
+        previousSellingPrice: product?.sellingPrice ?? 0,
+      };
+    })
+  );
+}
+
 export async function createPurchase(req: Request, res: Response) {
   assertCompanyAccess(req.user!, req.body.companyId);
   assertBranchAccess(req.user!, req.body.branchId, req.body.companyId);
 
+  const items = await enrichPurchaseItems(req.body.items);
   const poNumber = await generatePoNumber(req.body.companyId);
-  const totalAmount = calcTotal(req.body.items);
+  const totalAmount = calcTotal(items);
 
   const po = await PurchaseOrder.create({
     ...req.body,
+    items,
     poNumber,
     totalAmount,
     status: "draft",
@@ -63,7 +86,7 @@ export async function listPurchases(req: Request, res: Response) {
     PurchaseOrder.find(filter)
       .populate("supplierId", "name")
       .populate("branchId", "name code")
-      .populate("items.productId", "name sku unitOfMeasure")
+      .populate("items.productId", "name sku unitOfMeasure purchaseCost sellingPrice")
       .sort(buildSortQuery(sortBy ?? "createdAt", sortOrder ?? "desc"))
       .skip(skip)
       .limit(limit)
@@ -78,7 +101,7 @@ export async function getPurchase(req: Request, res: Response) {
   const po = await PurchaseOrder.findOne({ _id: req.params.id, deletedAt: null })
     .populate("supplierId", "name contactPerson phone email")
     .populate("branchId", "name code")
-    .populate("items.productId", "name sku code unitOfMeasure")
+    .populate("items.productId", "name sku code unitOfMeasure purchaseCost sellingPrice")
     .populate("requestedBy", "firstName lastName")
     .populate("approvedBy", "firstName lastName")
     .lean();
@@ -100,8 +123,75 @@ export async function updatePurchase(req: Request, res: Response) {
   }
 
   Object.assign(po, req.body, { updatedBy: req.user!._id });
-  if (req.body.items) po.totalAmount = calcTotal(req.body.items);
+  if (req.body.items) {
+    po.items = await enrichPurchaseItems(req.body.items);
+    po.totalAmount = calcTotal(po.items);
+  }
   await po.save();
+  return sendSuccess(res, po);
+}
+
+/** After supplier contact — update PO line prices/qty and sync product catalog prices */
+export async function amendPurchaseAfterOrder(req: Request, res: Response) {
+  const po = await PurchaseOrder.findOne({ _id: req.params.id, deletedAt: null });
+  if (!po) throw new AppError("NOT_FOUND", "Purchase order not found", 404);
+
+  if (!["ordered", "in_transit", "partially_received"].includes(po.status)) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "Prices and quantities can only be amended after the order is marked as ordered",
+      400
+    );
+  }
+
+  const amendments = req.body.items as {
+    productId: string;
+    quantityOrdered?: number;
+    newPurchaseCost?: number;
+    newSellingPrice?: number;
+  }[];
+
+  for (const amendment of amendments) {
+    const item = po.items.find((i) => String(i.productId) === amendment.productId);
+    if (!item) continue;
+
+    if (amendment.quantityOrdered !== undefined) {
+      if (amendment.quantityOrdered < item.quantityReceived) {
+        throw new AppError(
+          "BAD_REQUEST",
+          "Ordered quantity cannot be less than quantity already received",
+          400
+        );
+      }
+      item.quantityOrdered = amendment.quantityOrdered;
+    }
+
+    if (amendment.newPurchaseCost !== undefined) {
+      item.newPurchaseCost = amendment.newPurchaseCost;
+      item.unitCost = amendment.newPurchaseCost;
+    }
+
+    if (amendment.newSellingPrice !== undefined) {
+      item.newSellingPrice = amendment.newSellingPrice;
+    }
+
+    const product = await Product.findById(item.productId);
+    if (product) {
+      if (amendment.newPurchaseCost !== undefined) {
+        product.purchaseCost = amendment.newPurchaseCost;
+      }
+      if (amendment.newSellingPrice !== undefined) {
+        product.sellingPrice = amendment.newSellingPrice;
+      }
+      product.updatedBy = req.user!._id;
+      await product.save();
+    }
+  }
+
+  po.totalAmount = calcTotal(po.items);
+  po.updatedBy = req.user!._id;
+  await po.save();
+
   return sendSuccess(res, po);
 }
 
@@ -250,7 +340,7 @@ export async function sendPurchaseToSupplier(req: Request, res: Response) {
 
   if (!po) throw new AppError("NOT_FOUND", "Purchase order not found", 404);
 
-  const supplier = po.supplierId as {
+  const supplier = po.supplierId as unknown as {
     _id?: string;
     name?: string;
     email?: string;
@@ -262,7 +352,9 @@ export async function sendPurchaseToSupplier(req: Request, res: Response) {
   }
 
   const { sendPurchaseOrderToSupplier } = await import("../services/purchase-email.service");
-  await sendPurchaseOrderToSupplier(po, {
+  await sendPurchaseOrderToSupplier(
+    po as unknown as Parameters<typeof sendPurchaseOrderToSupplier>[0],
+    {
     name: supplier.name ?? "Supplier",
     email: supplier.email,
   });

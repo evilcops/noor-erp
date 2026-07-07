@@ -1,5 +1,5 @@
 import mongoose, { Schema, type Document, type Model } from "mongoose";
-import type { UserRole } from "../config/constants";
+import { ROLES, type UserRole } from "../config/constants";
 import { softDeletePlugin } from "./plugins/softDelete";
 
 export interface IUser extends Document {
@@ -31,15 +31,7 @@ const userSchema = new Schema<IUser>(
     phone: String,
     role: {
       type: String,
-      enum: [
-        "super_admin",
-        "business_owner",
-        "branch_manager",
-        "hr_manager",
-        "inventory_manager",
-        "procurement_manager",
-        "employee",
-      ],
+      enum: ROLES,
       required: true,
     },
     companyId: { type: Schema.Types.ObjectId, ref: "Company", index: true },
@@ -60,5 +52,9 @@ userSchema.virtual("fullName").get(function () {
 
 userSchema.plugin(softDeletePlugin);
 
-export const User: Model<IUser> =
-  mongoose.models.User ?? mongoose.model<IUser>("User", userSchema);
+// Re-register when schema changes (Next.js dev HMR keeps a stale cached model).
+if (mongoose.models.User) {
+  mongoose.deleteModel("User");
+}
+
+export const User: Model<IUser> = mongoose.model<IUser>("User", userSchema);

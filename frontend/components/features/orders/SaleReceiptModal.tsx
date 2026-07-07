@@ -37,6 +37,25 @@ export function SaleReceiptModal({ sale, open, onOpenChange, companyName }: Sale
           <p className="font-medium">{refName(sale.customerId)}</p>
           <p className="text-muted-foreground">{refName(sale.productId)} × {sale.quantity}</p>
           <p className="mt-2 text-lg font-bold">{formatAmount(sale.totalAmount)}</p>
+          {sale.riderAssigned && sale.riderCode ? (
+            <p className="mt-2 text-xs text-brand">
+              Rider {sale.riderCode} assigned automatically
+            </p>
+          ) : null}
+          {sale.delivery?.promisedWindowStart && sale.delivery?.promisedWindowEnd ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Delivery window:{" "}
+              {new Date(sale.delivery.promisedWindowStart).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+              –
+              {new Date(sale.delivery.promisedWindowEnd).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </p>
+          ) : null}
         </div>
 
         <ReceiptActions sale={sale} companyName={companyName} />

@@ -14,7 +14,9 @@ import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
+import { BranchSubBranchSelect } from "@/components/common/BranchSubBranchSelect";
 import { Select } from "@/components/ui/Select";
+import { effectiveBranchId } from "@/lib/branch-utils";
 import { Tabs } from "@/components/ui/Tabs";
 import { LeaveAttachmentViewer } from "@/components/features/leave/LeaveAttachmentViewer";
 import { useBranch } from "@/hooks";
@@ -68,7 +70,7 @@ function monthRange() {
 }
 
 export function LeavePage() {
-  const { branches, activeBranchId } = useBranch();
+  const { branches, activeMainBranchId, activeSubBranchId, activeBranchId } = useBranch();
   const { can } = usePermissions();
   const qc = useQueryClient();
   const range = monthRange();
@@ -78,7 +80,9 @@ export function LeavePage() {
   const [toDate, setToDate] = useState(range.to);
   const [statusFilter, setStatusFilter] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState("");
-  const [branchFilter, setBranchFilter] = useState("");
+  const [mainBranchFilter, setMainBranchFilter] = useState("");
+  const [subBranchFilter, setSubBranchFilter] = useState("");
+  const branchFilter = effectiveBranchId(mainBranchFilter, subBranchFilter);
   const [balanceEmployeeId, setBalanceEmployeeId] = useState("");
 
   const [formOpen, setFormOpen] = useState(false);
@@ -455,17 +459,19 @@ export function LeavePage() {
               <DateRangePicker fromDate={fromDate} toDate={toDate} onFromChange={setFromDate} onToChange={setToDate} />
             ) : null}
 
-            <div className="flex flex-col">
-              <label htmlFor="leaveBranchFilter">Branch</label>
-              <Select
-                id="leaveBranchFilter"
-                value={branchFilter}
-                onChange={(e) => setBranchFilter(e.target.value)}
-                options={[
-                  { value: "", label: "All Branches" },
-                  ...branches.map((b) => ({ value: b._id, label: b.name })),
-                ]}
-                className="w-44"
+            <div className="flex flex-col gap-1">
+              <span className="text-sm text-muted-foreground">Branch</span>
+              <BranchSubBranchSelect
+                branches={branches}
+                mainBranchId={mainBranchFilter}
+                subBranchId={subBranchFilter}
+                onMainBranchChange={(id) => {
+                  setMainBranchFilter(id);
+                  setSubBranchFilter("");
+                }}
+                onSubBranchChange={setSubBranchFilter}
+                allowAllMain
+                allMainLabel="All Branches"
               />
             </div>
 

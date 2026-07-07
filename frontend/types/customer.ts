@@ -1,9 +1,13 @@
+import type { Delivery } from "@/types/delivery";
+
 export interface Customer {
   _id: string;
   companyId: string;
   name?: string;
   phone: string;
   email?: string;
+  address?: string;
+  area?: string;
   notes?: string;
   totalPurchases?: number;
   totalSpent?: number;
@@ -25,6 +29,10 @@ export interface Sale {
   soldBy?: { firstName: string; lastName: string };
   notes?: string;
   createdAt: string;
+  customerCreated?: boolean;
+  riderAssigned?: boolean;
+  riderCode?: string;
+  delivery?: Delivery;
 }
 
 export interface CustomerDetail extends Customer {
@@ -40,6 +48,20 @@ export interface RecordSaleInput {
   customerPhone?: string;
   customerEmail?: string;
   customerName?: string;
+  customerAddress?: string;
+  customerArea?: string;
   unitPrice?: number;
+  notes?: string;
+  promisedWindowStart?: string;
+  promisedWindowEnd?: string;
+}
+
+export interface CreateCustomerInput {
+  companyId: string;
+  phone: string;
+  email?: string;
+  name?: string;
+  address?: string;
+  area?: string;
   notes?: string;
 }

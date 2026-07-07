@@ -36,6 +36,19 @@ export const updatePurchaseSchema = z.object({
     .optional(),
 });
 
+export const amendPurchaseSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        productId: z.string().min(1),
+        quantityOrdered: z.number().min(1).optional(),
+        newPurchaseCost: z.number().min(0).optional(),
+        newSellingPrice: z.number().min(0).optional(),
+      })
+    )
+    .min(1),
+});
+
 export const receivePurchaseSchema = z.object({
   items: z
     .array(

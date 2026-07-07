@@ -42,17 +42,17 @@ export async function listUsersHandler(req: Request, res: Response) {
 
   const items = result.items.map((u) => ({
     ...formatUser(u as unknown as Record<string, unknown>),
-    effectivePermissions: getUserPermissions(u as Parameters<typeof getUserPermissions>[0]),
+    effectivePermissions: getUserPermissions(u as unknown as Parameters<typeof getUserPermissions>[0]),
   }));
 
   return sendSuccess(res, items, 200, buildMeta(page, limit, result.total));
 }
 
 export async function getUserHandler(req: Request, res: Response) {
-  const user = await getUserById(req.user!, req.params.id);
+  const user = await getUserById(req.user!, String(req.params.id));
   return sendSuccess(res, {
     ...formatUser(user.toObject() as unknown as Record<string, unknown>),
-    effectivePermissions: getUserPermissions(user),
+    effectivePermissions: getUserPermissions(user as unknown as Parameters<typeof getUserPermissions>[0]),
   });
 }
 
@@ -62,12 +62,12 @@ export async function createUserHandler(req: Request, res: Response) {
 }
 
 export async function updateUserHandler(req: Request, res: Response) {
-  const user = await updateUser(req.user!, req.params.id, req.body);
+  const user = await updateUser(req.user!, String(req.params.id), req.body);
   return sendSuccess(res, formatUser(user as unknown as Record<string, unknown>));
 }
 
 export async function deleteUserHandler(req: Request, res: Response) {
-  const result = await deleteUser(req.user!, req.params.id);
+  const result = await deleteUser(req.user!, String(req.params.id));
   return sendSuccess(res, result);
 }
 

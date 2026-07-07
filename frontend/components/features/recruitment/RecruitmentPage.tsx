@@ -13,7 +13,9 @@ import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
+import { BranchSubBranchSelect } from "@/components/common/BranchSubBranchSelect";
 import { Select } from "@/components/ui/Select";
+import { effectiveBranchId, resolveMainAndSubBranchId } from "@/lib/branch-utils";
 import { Tabs } from "@/components/ui/Tabs";
 import { useAuth, useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -65,14 +67,16 @@ const emptyFeedbackForm = {
 
 export function RecruitmentPage() {
   const { user, isLoading: authLoading } = useAuth();
-  const { branches, activeBranchId } = useBranch();
+  const { branches, activeMainBranchId, activeSubBranchId, activeBranchId } = useBranch();
   const { can } = usePermissions();
   const qc = useQueryClient();
 
   const [view, setView] = useState<"kanban" | "table">("kanban");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [branchFilter, setBranchFilter] = useState("");
+  const [mainBranchFilter, setMainBranchFilter] = useState("");
+  const [subBranchFilter, setSubBranchFilter] = useState("");
+  const branchFilter = effectiveBranchId(mainBranchFilter, subBranchFilter);
 
   const [addOpen, setAddOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -364,14 +368,16 @@ export function RecruitmentPage() {
           options={STATUS_FILTER}
           className="w-44"
         />
-        <Select
-          value={branchFilter}
-          onChange={(e) => setBranchFilter(e.target.value)}
-          options={[
-            { value: "", label: "All branches" },
-            ...branches.map((b) => ({ value: b._id, label: b.name })),
-          ]}
-          className="w-48"
+        <BranchSubBranchSelect
+          branches={branches}
+          mainBranchId={mainBranchFilter}
+          subBranchId={subBranchFilter}
+          onMainBranchChange={(id) => {
+            setMainBranchFilter(id);
+            setSubBranchFilter("");
+          }}
+          onSubBranchChange={setSubBranchFilter}
+          allowAllMain
         />
         <div className="inline-flex rounded-lg border border-border bg-card p-1 shadow-sm">
           <button
@@ -456,15 +462,17 @@ export function RecruitmentPage() {
                   ]}
                 />
               </div>
-              <div>
+              <div className="sm:col-span-2">
                 <Label>Branch *</Label>
-                <Select
-                  value={addBranchId}
-                  onChange={(e) => setAddBranchId(e.target.value)}
-                  options={[
-                    { value: "", label: "Select branch" },
-                    ...addBranchOptions.map((b) => ({ value: b._id, label: b.name })),
-                  ]}
+                <BranchSubBranchSelect
+                  branches={addBranchOptions}
+                  mainBranchId={resolveMainAndSubBranchId(addBranchId, addBranchOptions).mainId}
+                  subBranchId={resolveMainAndSubBranchId(addBranchId, addBranchOptions).subId}
+                  onMainBranchChange={(id) => setAddBranchId(id)}
+                  onSubBranchChange={(id) => {
+                    const mainId = resolveMainAndSubBranchId(addBranchId, addBranchOptions).mainId;
+                    setAddBranchId(id || mainId);
+                  }}
                 />
               </div>
             </>

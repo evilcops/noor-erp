@@ -11,7 +11,9 @@ import { Modal } from "@/components/ui/Modal";
 import { Select } from "@/components/ui/Select";
 import { Tabs } from "@/components/ui/Tabs";
 import { FileUpload } from "@/components/common/FileUpload";
+import { BranchSubBranchSelect } from "@/components/common/BranchSubBranchSelect";
 import { DocumentViewer } from "@/components/features/employees/DocumentViewer";
+import { resolveMainAndSubBranchId } from "@/lib/branch-utils";
 import { useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { ROLE_LABELS } from "@/config/permissions";
@@ -198,6 +200,11 @@ const EMPTY: EmployeeFormValues = {
   createUserAccount: false,
   userPassword: "",
   userRole: "employee",
+  registerAsRider: false,
+  riderVehicleMake: "",
+  riderVehicleModel: "",
+  riderVehiclePlate: "",
+  riderWhatsappPhone: "",
   leaveBalance: defaultLeaveBalanceForm(),
 };
 
@@ -226,7 +233,7 @@ export function EmployeeFormModal({
   onUploadDocument,
   loading,
 }: EmployeeFormModalProps) {
-  const { branches } = useBranch();
+  const { branches, mainBranches } = useBranch();
   const { can } = usePermissions();
   const [tab, setTab] = useState("personal");
   const [form, setForm] = useState<EmployeeFormValues>(EMPTY);
@@ -286,7 +293,7 @@ export function EmployeeFormModal({
         leaveBalanceUsed: leaveBalanceUsedFromApi(employee.leaveBalance),
       });
     } else {
-      setForm({ ...EMPTY, branchId: branches[0]?._id ?? "" });
+      setForm({ ...EMPTY, branchId: mainBranches[0]?._id ?? branches[0]?._id ?? "" });
     }
     setFiles(EMPTY_FILES);
     setFamilyType(employee?.familyType ?? "individual");
@@ -681,6 +688,7 @@ export function EmployeeFormModal({
                         }
                         options={[
                           { value: "employee", label: ROLE_LABELS.employee },
+                          { value: "rider", label: ROLE_LABELS.rider },
                           { value: "hr_manager", label: ROLE_LABELS.hr_manager },
                           { value: "branch_manager", label: ROLE_LABELS.branch_manager },
                           { value: "business_owner", label: ROLE_LABELS.business_owner },
@@ -691,6 +699,75 @@ export function EmployeeFormModal({
                         Permissions after creation.
                       </p>
                     </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {can("employee:create") || can("employee:edit") ? (
+            <div className="sm:col-span-2 rounded-lg border border-border bg-muted/20 p-4">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={form.registerAsRider ?? false}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    updateField("registerAsRider", checked);
+                    if (checked) {
+                      updateField("createUserAccount", true);
+                      updateField("userRole", "rider");
+                    }
+                  }}
+                  className="mt-1 h-4 w-4 rounded border-border accent-brand"
+                />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-foreground">Register as delivery rider</p>
+                  <p className="text-xs text-muted-foreground">
+                    Creates a rider profile and requires a Rider login (password below). Licence
+                    details come from compliance documents above.
+                  </p>
+                </div>
+              </label>
+
+              {form.registerAsRider ? (
+                <div className="mt-4 grid gap-4 sm:grid-cols-2 border-t border-border pt-4">
+                  <div>
+                    <Label>Vehicle make</Label>
+                    <Input
+                      value={form.riderVehicleMake ?? ""}
+                      onChange={(e) => updateField("riderVehicleMake", e.target.value)}
+                      placeholder="e.g. Toyota"
+                    />
+                  </div>
+                  <div>
+                    <Label>Vehicle model</Label>
+                    <Input
+                      value={form.riderVehicleModel ?? ""}
+                      onChange={(e) => updateField("riderVehicleModel", e.target.value)}
+                      placeholder="e.g. Hiace"
+                    />
+                  </div>
+                  <div>
+                    <Label>Plate number</Label>
+                    <Input
+                      value={form.riderVehiclePlate ?? ""}
+                      onChange={(e) => updateField("riderVehiclePlate", e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label>WhatsApp phone</Label>
+                    <Input
+                      value={form.riderWhatsappPhone ?? form.phone ?? ""}
+                      onChange={(e) => updateField("riderWhatsappPhone", e.target.value)}
+                      placeholder="For delivery notifications"
+                    />
+                  </div>
+                  {form.registerAsRider ? (
+                    <p className="sm:col-span-2 text-xs text-muted-foreground">
+                      A Rider login is required — use the password fields in &quot;Create system user
+                      account&quot; above (role is set to Rider automatically).
+                    </p>
                   ) : null}
                 </div>
               ) : null}
@@ -708,15 +785,21 @@ export function EmployeeFormModal({
               <Input value={employee.employeeId} readOnly className="bg-muted" />
             </div>
           ) : null}
-          <div>
+          <div className="sm:col-span-2">
             <Label>Branch *</Label>
-            <Select
-              value={form.branchId}
-              onChange={(e) => updateField("branchId", e.target.value)}
-              options={branches.map((b) => ({ value: b._id, label: b.name }))}
-              placeholder="Select branch"
-              error={errors.branchId}
+            <BranchSubBranchSelect
+              branches={branches}
+              mainBranchId={resolveMainAndSubBranchId(form.branchId, branches).mainId}
+              subBranchId={resolveMainAndSubBranchId(form.branchId, branches).subId}
+              onMainBranchChange={(id) => updateField("branchId", id)}
+              onSubBranchChange={(id) => {
+                const mainId = resolveMainAndSubBranchId(form.branchId, branches).mainId;
+                updateField("branchId", id || mainId);
+              }}
             />
+            {errors.branchId ? (
+              <p className="mt-1 text-xs text-destructive">{errors.branchId}</p>
+            ) : null}
           </div>
           <div>
             <Label>Department *</Label>
@@ -1681,7 +1764,18 @@ export function formToPayload(
       ? {
           createUserAccount: true,
           userPassword: form.userPassword,
-          userRole: form.userRole ?? "employee",
+          userRole: form.userRole ?? (form.registerAsRider ? "rider" : "employee"),
+        }
+      : {}),
+    ...(form.registerAsRider
+      ? {
+          registerAsRider: true,
+          riderVehicle: {
+            make: form.riderVehicleMake || undefined,
+            model: form.riderVehicleModel || undefined,
+            plate: form.riderVehiclePlate || undefined,
+            whatsappPhone: form.riderWhatsappPhone || form.phone || undefined,
+          },
         }
       : {}),
     leaveBalance: {

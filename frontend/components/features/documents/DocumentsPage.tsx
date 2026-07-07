@@ -10,7 +10,9 @@ import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
+import { BranchSubBranchSelect } from "@/components/common/BranchSubBranchSelect";
 import { Select } from "@/components/ui/Select";
+import { effectiveBranchId, resolveMainAndSubBranchId } from "@/lib/branch-utils";
 import { Tabs } from "@/components/ui/Tabs";
 import { useAuth, useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -18,7 +20,7 @@ import { useEmployees } from "@/hooks/useEmployees";
 import { businessDocApi } from "@/lib/api/businessDocuments";
 import { branchDocApi } from "@/lib/api/branchDocuments";
 import { getAccessToken } from "@/lib/api/token";
-import type { BusinessDocument, BranchDocument } from "@/types/documents";
+import type { BusinessDocument, BranchDocument, BusinessDocType, BranchDocType } from "@/types/documents";
 import type { Employee } from "@/types/employee";
 import { employeeApi } from "@/lib/api/employees";
 import { formatDate } from "@/lib/date";
@@ -272,7 +274,13 @@ function BusinessDocumentsTab() {
 
   const saveMut = useMutation({
     mutationFn: () => {
-      const payload = { ...form, customTypeName: form.type === "custom" ? form.customTypeName : undefined };
+      const payload = {
+        type: form.type as BusinessDocType,
+        startDate: form.startDate,
+        expiryDate: form.expiryDate,
+        notes: form.notes,
+        customTypeName: form.type === "custom" ? form.customTypeName : undefined,
+      };
       return selected
         ? businessDocApi.update(selected._id, payload)
         : businessDocApi.create(payload);
@@ -476,7 +484,9 @@ function BranchDocumentsTab() {
   const qc = useQueryClient();
   const { can } = usePermissions();
   const { branches } = useBranch();
-  const [branchFilter, setBranchFilter] = useState("");
+  const [mainBranchFilter, setMainBranchFilter] = useState("");
+  const [subBranchFilter, setSubBranchFilter] = useState("");
+  const branchFilter = effectiveBranchId(mainBranchFilter, subBranchFilter);
   const [formOpen, setFormOpen] = useState(false);
   const [selected, setSelected] = useState<BranchDocument | null>(null);
   const [form, setForm] = useState(emptyBranchForm);
@@ -493,7 +503,10 @@ function BranchDocumentsTab() {
   const saveMut = useMutation({
     mutationFn: () => {
       const payload = {
-        ...form,
+        type: form.type as BranchDocType,
+        issuanceDate: form.issuanceDate,
+        expiryDate: form.expiryDate,
+        notes: form.notes,
         customTypeName: form.type === "custom" ? form.customTypeName : undefined,
       };
       return selected
@@ -556,14 +569,16 @@ function BranchDocumentsTab() {
       ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Select
-          value={branchFilter}
-          onChange={(e) => setBranchFilter(e.target.value)}
-          options={[
-            { value: "", label: "All branches" },
-            ...branches.map((b) => ({ value: b._id, label: b.name })),
-          ]}
-          className="w-56"
+        <BranchSubBranchSelect
+          branches={branches}
+          mainBranchId={mainBranchFilter}
+          subBranchId={subBranchFilter}
+          onMainBranchChange={(id) => {
+            setMainBranchFilter(id);
+            setSubBranchFilter("");
+          }}
+          onSubBranchChange={setSubBranchFilter}
+          allowAllMain
         />
         {can("employee:edit") ? (
           <Button onClick={() => { setSelected(null); setForm({ ...emptyBranchForm, branchId: branchFilter || (branches[0]?._id ?? "") }); setFormOpen(true); }}>
@@ -641,10 +656,15 @@ function BranchDocumentsTab() {
           {!selected ? (
             <div>
               <Label>Branch *</Label>
-              <Select
-                value={form.branchId}
-                onChange={(e) => setForm({ ...form, branchId: e.target.value })}
-                options={[{ value: "", label: "Select branch…" }, ...branches.map((b) => ({ value: b._id, label: b.name }))]}
+              <BranchSubBranchSelect
+                branches={branches}
+                mainBranchId={resolveMainAndSubBranchId(form.branchId, branches).mainId}
+                subBranchId={resolveMainAndSubBranchId(form.branchId, branches).subId}
+                onMainBranchChange={(id) => setForm({ ...form, branchId: id })}
+                onSubBranchChange={(id) => {
+                  const mainId = resolveMainAndSubBranchId(form.branchId, branches).mainId;
+                  setForm({ ...form, branchId: id || mainId });
+                }}
               />
             </div>
           ) : null}

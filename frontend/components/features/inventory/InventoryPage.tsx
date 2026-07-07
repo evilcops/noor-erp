@@ -11,10 +11,14 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
 import { Select } from "@/components/ui/Select";
+import { BranchSubBranchSelect } from "@/components/common/BranchSubBranchSelect";
+import { effectiveBranchId } from "@/lib/branch-utils";
 import { useAuth, useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { customerApi, salesApi } from "@/lib/api/customers";
 import { inventoryApi } from "@/lib/api/inventory";
+import { deliveryApi } from "@/lib/api/deliveries";
+import { normalizePhone } from "@/lib/phone";
 import { SaleReceiptModal } from "@/components/features/orders/SaleReceiptModal";
 import type { Customer, Sale } from "@/types/customer";
 import type { StockLevel } from "@/types/inventory";
@@ -31,20 +35,31 @@ function customerLabel(c: Customer) {
   return parts.join(" · ");
 }
 
+function formatWindow(start: string, end: string) {
+  const s = new Date(start);
+  const e = new Date(end);
+  return `${s.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} – ${e.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
+
 const emptySellForm = {
   customerPhone: "",
   customerEmail: "",
   customerName: "",
+  customerAddress: "",
+  customerArea: "",
   quantity: "",
   notes: "",
+  earliestDelivery: "",
 };
 
 export function InventoryPage() {
   const { user } = useAuth();
-  const { branches, activeBranchId } = useBranch();
+  const { branches, activeMainBranchId, activeSubBranchId } = useBranch();
   const { can } = usePermissions();
   const qc = useQueryClient();
-  const [branchFilter, setBranchFilter] = useState(activeBranchId ?? "");
+  const [mainBranchFilter, setMainBranchFilter] = useState(activeMainBranchId ?? "");
+  const [subBranchFilter, setSubBranchFilter] = useState(activeSubBranchId ?? "");
+  const branchFilter = effectiveBranchId(mainBranchFilter, subBranchFilter);
   const [page, setPage] = useState(1);
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [sellOpen, setSellOpen] = useState(false);
@@ -57,9 +72,14 @@ export function InventoryPage() {
   const [customerSearch, setCustomerSearch] = useState("");
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const [promiseOpen, setPromiseOpen] = useState(false);
+  const [promiseWindows, setPromiseWindows] = useState<
+    { start: string; end: string; label: string }[]
+  >([]);
+  const [selectedWindow, setSelectedWindow] = useState<{ start: string; end: string } | null>(null);
 
   const isSuperAdmin = user?.role === "super_admin";
-  const companyId = user?.companyId ?? "";
+  const companyId = user?.companyId ?? branches[0]?.companyId ?? "";
   const isNewCustomer = customerSelection === NEW_CUSTOMER_VALUE;
 
   const { data, isLoading } = useQuery({
@@ -118,29 +138,92 @@ export function InventoryPage() {
   });
 
   const sellMut = useMutation({
-    mutationFn: () =>
-      salesApi.record({
+    mutationFn: ({
+      promise,
+      selection,
+      form,
+    }: {
+      promise?: { start: string; end: string };
+      selection: string;
+      form: typeof emptySellForm;
+    }) => {
+      const isNew = selection === NEW_CUSTOMER_VALUE;
+      return salesApi.record({
         companyId,
         branchId: typeof selected!.branchId === "object" ? selected!.branchId._id : selected!.branchId,
         productId: typeof selected!.productId === "object" ? selected!.productId._id : selected!.productId,
-        quantity: Number(sellForm.quantity),
-        ...(isNewCustomer
+        quantity: Number(form.quantity),
+        ...(isNew
           ? {
-              customerPhone: sellForm.customerPhone.trim(),
-              customerEmail: sellForm.customerEmail.trim() || undefined,
-              customerName: sellForm.customerName.trim() || undefined,
+              customerPhone: form.customerPhone.trim(),
+              customerEmail: form.customerEmail.trim() || undefined,
+              customerName: form.customerName.trim() || undefined,
+              customerAddress: form.customerAddress.trim() || undefined,
+              customerArea: form.customerArea.trim() || undefined,
             }
-          : { customerId: customerSelection }),
-        notes: sellForm.notes.trim() || undefined,
-      }),
-    onSuccess: (sale) => {
-      toast.success("Sale recorded");
+          : { customerId: selection }),
+        notes: form.notes.trim() || undefined,
+        promisedWindowStart: promise?.start,
+        promisedWindowEnd: promise?.end,
+      });
+    },
+    onSuccess: (sale: Sale) => {
+      const customer =
+        typeof sale.customerId === "object"
+          ? sale.customerId
+          : null;
+      if (sale.riderAssigned && sale.riderCode) {
+        toast.success(
+          `Sale recorded — rider ${sale.riderCode} assigned automatically for delivery`
+        );
+      } else if (sale.customerCreated === false && customer) {
+        toast.success(
+          `Sale recorded — linked to existing customer (${customer.name || customer.phone}). Delivery queued — no rider available yet.`
+        );
+      } else {
+        toast.success("Sale recorded — delivery queued (assign rider from Deliveries if needed)");
+      }
       setSellOpen(false);
+      setPromiseOpen(false);
       resetSellForm();
+      setSelectedWindow(null);
       setCompletedSale(sale);
       setReceiptOpen(true);
       void qc.invalidateQueries({ queryKey: ["stock-levels"] });
       void qc.invalidateQueries({ queryKey: ["customers"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const promiseMut = useMutation({
+    mutationFn: async () => {
+      const branchId = typeof selected!.branchId === "object" ? selected!.branchId._id : selected!.branchId;
+      const qty = Number(sellForm.quantity);
+      return deliveryApi.predictPromise({
+        companyId,
+        branchId,
+        totalAmount: qty,
+        quantity: qty,
+        earliestAcceptableAt: sellForm.earliestDelivery
+          ? new Date(sellForm.earliestDelivery).toISOString()
+          : undefined,
+      });
+    },
+    onSuccess: (prediction) => {
+      const primary = {
+        start: prediction.promisedWindowStart,
+        end: prediction.promisedWindowEnd,
+        label: "Earliest available",
+      };
+      const alternatives = (prediction.alternativeWindows ?? []).map((w, i) => ({
+        start: w.start,
+        end: w.end,
+        label: `Alternative ${i + 1}`,
+      }));
+      const windows = [primary, ...alternatives];
+      setPromiseWindows(windows);
+      setSelectedWindow({ start: primary.start, end: primary.end });
+      setPromiseOpen(true);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -165,6 +248,8 @@ export function InventoryPage() {
         customerPhone: "",
         customerEmail: "",
         customerName: "",
+        customerAddress: "",
+        customerArea: "",
       }));
     }
   };
@@ -173,7 +258,9 @@ export function InventoryPage() {
     !!sellForm.quantity &&
     Number(sellForm.quantity) >= 1 &&
     (!selected || Number(sellForm.quantity) <= selected.currentStock) &&
-    (isNewCustomer ? !!sellForm.customerPhone.trim() : !!customerSelection);
+    (isNewCustomer
+      ? normalizePhone(sellForm.customerPhone).length > 0
+      : !!customerSelection && customerSelection !== NEW_CUSTOMER_VALUE);
 
   const columns: Column<StockLevel>[] = [
     { key: "product", header: "Product", cell: (r) => refName(r.productId) },
@@ -215,11 +302,16 @@ export function InventoryPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Branch Inventory" description="Branch-wise stock levels, damaged and returned quantities" />
-      <Select
-        value={branchFilter}
-        onChange={(e) => setBranchFilter(e.target.value)}
-        className="w-56"
-        options={[{ value: "", label: "All branches" }, ...branches.map((b) => ({ value: b._id, label: b.name }))]}
+      <BranchSubBranchSelect
+        branches={branches}
+        mainBranchId={mainBranchFilter}
+        subBranchId={subBranchFilter}
+        onMainBranchChange={(id) => {
+          setMainBranchFilter(id);
+          setSubBranchFilter("");
+        }}
+        onSubBranchChange={setSubBranchFilter}
+        allowAllMain
       />
       <DataTable columns={columns} data={data?.data ?? []} loading={isLoading} page={page} totalPages={data?.meta?.totalPages ?? 1} onPageChange={setPage} />
 
@@ -267,16 +359,79 @@ export function InventoryPage() {
               <div><Label>Phone *</Label><Input value={sellForm.customerPhone} onChange={(e) => setSellForm({ ...sellForm, customerPhone: e.target.value })} /></div>
               <div><Label>Email</Label><Input type="email" value={sellForm.customerEmail} onChange={(e) => setSellForm({ ...sellForm, customerEmail: e.target.value })} /></div>
               <div><Label>Name</Label><Input value={sellForm.customerName} onChange={(e) => setSellForm({ ...sellForm, customerName: e.target.value })} /></div>
+              <div><Label>Delivery address</Label><Input value={sellForm.customerAddress} onChange={(e) => setSellForm({ ...sellForm, customerAddress: e.target.value })} placeholder="Street, building, area" /></div>
+              <div><Label>Area / zone</Label><Input value={sellForm.customerArea} onChange={(e) => setSellForm({ ...sellForm, customerArea: e.target.value })} placeholder="e.g. Al Khuwair, Ruwi" /></div>
             </>
           ) : null}
 
           <div><Label>Quantity *</Label><Input type="number" min={1} max={selected?.currentStock ?? undefined} value={sellForm.quantity} onChange={(e) => setSellForm({ ...sellForm, quantity: e.target.value })} /></div>
+          <div>
+            <Label>Earliest delivery (optional)</Label>
+            <Input
+              type="datetime-local"
+              value={sellForm.earliestDelivery}
+              onChange={(e) => setSellForm({ ...sellForm, earliestDelivery: e.target.value })}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              If the customer cannot receive before a certain time, set it here (e.g. after 2:00 PM).
+            </p>
+          </div>
           <div><Label>Notes</Label><Input value={sellForm.notes} onChange={(e) => setSellForm({ ...sellForm, notes: e.target.value })} /></div>
         </div>
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setSellOpen(false)}>Cancel</Button>
-          <Button disabled={!canCompleteSale || sellMut.isPending} onClick={() => sellMut.mutate()}>
-            Complete Sale
+          <Button
+            disabled={!canCompleteSale || promiseMut.isPending || sellMut.isPending}
+            onClick={() => promiseMut.mutate()}
+          >
+            Check Delivery Window
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={promiseOpen}
+        onOpenChange={setPromiseOpen}
+        title="45-Minute Delivery Promise"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Select an achievable delivery window. Once confirmed, this becomes the customer&apos;s delivery promise.
+          </p>
+          <div className="space-y-2">
+            {promiseWindows.map((w) => (
+              <label
+                key={w.start}
+                className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 ${
+                  selectedWindow?.start === w.start ? "border-primary bg-primary/5" : "border-border"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="delivery-window"
+                  checked={selectedWindow?.start === w.start}
+                  onChange={() => setSelectedWindow({ start: w.start, end: w.end })}
+                  className="mt-1"
+                />
+                <div>
+                  <p className="font-medium text-sm">{w.label}</p>
+                  <p className="text-sm text-muted-foreground">{formatWindow(w.start, w.end)}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setPromiseOpen(false)}>Back</Button>
+          <Button
+            disabled={!selectedWindow || sellMut.isPending}
+            onClick={() => selectedWindow && sellMut.mutate({
+              promise: selectedWindow,
+              selection: customerSelection,
+              form: sellForm,
+            })}
+          >
+            Confirm Sale &amp; Promise
           </Button>
         </div>
       </Modal>

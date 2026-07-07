@@ -14,7 +14,9 @@ import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
+import { BranchSubBranchSelect } from "@/components/common/BranchSubBranchSelect";
 import { Select } from "@/components/ui/Select";
+import { resolveMainAndSubBranchId } from "@/lib/branch-utils";
 import { ProductImage } from "@/components/features/products/ProductImage";
 import { useAuth, useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -302,12 +304,17 @@ export function ProductsPage() {
           <div><Label>Reorder Level</Label><Input type="number" value={form.reorderLevel} onChange={(e) => setForm({ ...form, reorderLevel: e.target.value })} /></div>
           {!selected ? (
             <>
-              <div>
+              <div className="sm:col-span-2">
                 <Label>Initial Branch</Label>
-                <Select
-                  value={branchId}
-                  onChange={(e) => setBranchId(e.target.value)}
-                  options={branches.map((b) => ({ value: b._id, label: b.name }))}
+                <BranchSubBranchSelect
+                  branches={branches}
+                  mainBranchId={resolveMainAndSubBranchId(branchId, branches).mainId}
+                  subBranchId={resolveMainAndSubBranchId(branchId, branches).subId}
+                  onMainBranchChange={(id) => setBranchId(id)}
+                  onSubBranchChange={(id) => {
+                    const mainId = resolveMainAndSubBranchId(branchId, branches).mainId;
+                    setBranchId(id || mainId);
+                  }}
                 />
               </div>
               <div><Label>Initial Qty</Label><Input type="number" value={form.initialQty} onChange={(e) => setForm({ ...form, initialQty: e.target.value })} /></div>
@@ -402,7 +409,7 @@ export function ProductsPage() {
               <div>
                 <p className="mb-2 font-medium">Branch Stock</p>
                 <div className="space-y-1">
-                  {selected.stockLevels.map((s: { _id: string; branchId?: { name?: string }; currentStock: number }) => (
+                  {selected.stockLevels.map((s) => (
                     <div key={s._id} className="flex justify-between rounded border px-3 py-2">
                       <span>{typeof s.branchId === "object" ? s.branchId?.name : "Branch"}</span>
                       <span className="font-semibold">{s.currentStock}</span>

@@ -3,7 +3,6 @@ import { Product } from "../models/Product.model";
 import { StockLevel } from "../models/StockLevel.model";
 import type { StockMovementType } from "../models/StockMovement.model";
 import { StockMovement } from "../models/StockMovement.model";
-import type mongoose from "mongoose";
 
 export async function generateSku(companyId: mongoose.Types.ObjectId | string): Promise<string> {
   const count = await Product.countDocuments({ companyId, deletedAt: null });

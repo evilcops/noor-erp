@@ -9,12 +9,15 @@ import {
   useState,
 } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { useAuth } from "@/hooks";
 import {
   ERP_MODULE_STORAGE_KEY,
   getModuleDefaultPath,
   getModuleFromPathname,
+  isRiderAllowedPath,
   type ErpModule,
 } from "@/config/modules";
+import { isRiderRole } from "@/lib/permissions";
 
 interface ModuleContextValue {
   activeModule: ErpModule;
@@ -26,15 +29,27 @@ const ModuleContext = createContext<ModuleContextValue | null>(null);
 function readStoredModule(): ErpModule {
   if (typeof window === "undefined") return "hr";
   const stored = localStorage.getItem(ERP_MODULE_STORAGE_KEY);
-  return stored === "inventory" ? "inventory" : "hr";
+  if (stored === "inventory") return "inventory";
+  if (stored === "riders") return "riders";
+  return "hr";
 }
 
 export function ModuleProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { user } = useAuth();
   const [activeModule, setActiveModuleState] = useState<ErpModule>("hr");
 
   useEffect(() => {
+    if (isRiderRole(user)) {
+      setActiveModuleState("riders");
+      localStorage.setItem(ERP_MODULE_STORAGE_KEY, "riders");
+      if (!isRiderAllowedPath(pathname)) {
+        router.replace("/riders");
+      }
+      return;
+    }
+
     const fromPath = getModuleFromPathname(pathname);
     if (fromPath) {
       setActiveModuleState(fromPath);
@@ -42,15 +57,16 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     setActiveModuleState(readStoredModule());
-  }, [pathname]);
+  }, [pathname, user, router]);
 
   const setActiveModule = useCallback(
     (module: ErpModule) => {
+      if (isRiderRole(user) && module !== "riders") return;
       setActiveModuleState(module);
       localStorage.setItem(ERP_MODULE_STORAGE_KEY, module);
-      router.push(getModuleDefaultPath(module));
+      router.push(getModuleDefaultPath(module, user?.role));
     },
-    [router]
+    [router, user?.role, user]
   );
 
   const value = useMemo(

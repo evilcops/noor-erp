@@ -50,7 +50,23 @@ export const employeeFormSchema = z
     car_insurance: optionalDocSchema.optional(),
     createUserAccount: z.boolean().optional(),
     userPassword: z.string().optional(),
-    userRole: z.enum(["super_admin", "business_owner", "branch_manager", "hr_manager", "employee"]).optional(),
+    userRole: z
+      .enum([
+        "super_admin",
+        "business_owner",
+        "branch_manager",
+        "hr_manager",
+        "inventory_manager",
+        "procurement_manager",
+        "rider",
+        "employee",
+      ])
+      .optional(),
+    registerAsRider: z.boolean().optional(),
+    riderVehicleMake: z.string().optional(),
+    riderVehicleModel: z.string().optional(),
+    riderVehiclePlate: z.string().optional(),
+    riderWhatsappPhone: z.string().optional(),
     leaveBalance: leaveBalanceFormSchema,
     leaveBalanceUsed: z
       .object({
@@ -99,6 +115,13 @@ export const employeeFormSchema = z
         code: z.ZodIssueCode.custom,
         path: ["userPassword"],
         message: "Password must be at least 8 characters",
+      });
+    }
+    if (data.registerAsRider && (!data.userPassword || data.userPassword.length < 8)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["userPassword"],
+        message: "Rider login password must be at least 8 characters",
       });
     }
   });

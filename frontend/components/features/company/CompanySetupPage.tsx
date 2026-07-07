@@ -17,6 +17,7 @@ import { Select } from "@/components/ui/Select";
 import { usePermissions } from "@/hooks/usePermissions";
 import { companyApi, type Company } from "@/lib/api/companies";
 import { businessDocApi } from "@/lib/api/businessDocuments";
+import type { BusinessDocType } from "@/types/documents";
 import { getAccessToken } from "@/lib/api/token";
 import type { BusinessDocument } from "@/types/documents";
 import { formatDate } from "@/lib/date";
@@ -222,7 +223,10 @@ function BusinessDocumentsPanel({ companyId, companyName, canEdit, onClose, init
   const saveMut = useMutation({
     mutationFn: async () => {
       const payload = {
-        ...form,
+        type: form.type as BusinessDocType,
+        startDate: form.startDate,
+        expiryDate: form.expiryDate,
+        notes: form.notes,
         companyId,
         customTypeName: form.type === "custom" ? form.customTypeName : undefined,
       };

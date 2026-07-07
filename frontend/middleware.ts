@@ -17,16 +17,18 @@ function getSecrets(): Uint8Array[] {
     .map((secret) => new TextEncoder().encode(secret as string));
 }
 
-async function isValidAccessToken(token: string): Promise<boolean> {
+async function verifyAccessToken(token: string): Promise<{ role?: string } | null> {
   for (const secret of getSecrets()) {
     try {
       const { payload } = await jwtVerify(token, secret);
-      if (payload.type === "access" || payload.sub) return true;
+      if (payload.type === "access" || payload.sub) {
+        return { role: typeof payload.role === "string" ? payload.role : undefined };
+      }
     } catch {
       continue;
     }
   }
-  return false;
+  return null;
 }
 
 export async function middleware(request: NextRequest) {
@@ -57,10 +59,16 @@ export async function middleware(request: NextRequest) {
         }
       })()
     : undefined;
-  const isAuthenticated = accessToken ? await isValidAccessToken(accessToken) : false;
+  const tokenPayload = accessToken ? await verifyAccessToken(accessToken) : null;
+  const isAuthenticated = Boolean(tokenPayload);
+  const homePath = tokenPayload?.role === "rider" ? "/riders" : "/";
 
   if (AUTH_PATHS.includes(pathname) && isAuthenticated) {
-    return NextResponse.redirect(new URL("/", request.url));
+    return NextResponse.redirect(new URL(homePath, request.url));
+  }
+
+  if (isAuthenticated && tokenPayload?.role === "rider" && pathname === "/") {
+    return NextResponse.redirect(new URL("/riders", request.url));
   }
 
   if (!isPublic && !isAuthenticated) {

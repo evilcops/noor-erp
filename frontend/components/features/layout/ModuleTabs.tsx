@@ -1,31 +1,61 @@
 "use client";
 
-import { Briefcase, Warehouse } from "lucide-react";
-import { MAIN_NAV, SUPPLY_NAV } from "@/config/site";
-import { MODULE_LABELS, type ErpModule } from "@/config/modules";
+import { Briefcase, Warehouse, Bike } from "lucide-react";
+import { MAIN_NAV, SUPPLY_NAV, RIDERS_NAV } from "@/config/site";
+import { MODULE_LABELS, getModuleDefaultPath, type ErpModule } from "@/config/modules";
 import { useErpModule } from "@/components/providers/ModuleProvider";
+import { useAuth } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
+import { isRiderRole } from "@/lib/permissions";
+import type { NavItem } from "@/config/site";
+import type { UserRole } from "@/types/auth-user";
 import { cn } from "@/lib/utils";
 
-function filterNav<T extends { permission?: string }>(
-  items: T[],
-  can: (permission: string) => boolean
-): T[] {
-  return items.filter((item) => !item.permission || can(item.permission));
+function filterNav(
+  items: NavItem[],
+  can: (permission: string) => boolean,
+  userRole?: UserRole
+): NavItem[] {
+  return items.filter((item) => {
+    if (item.roles?.length) {
+      return userRole ? item.roles.includes(userRole) : false;
+    }
+    if (item.permission && !can(item.permission)) return false;
+    return true;
+  });
 }
 
 const TAB_CONFIG: { id: ErpModule; icon: typeof Briefcase }[] = [
   { id: "hr", icon: Briefcase },
   { id: "inventory", icon: Warehouse },
+  { id: "riders", icon: Bike },
 ];
+
+function getNavForModule(module: ErpModule) {
+  if (module === "inventory") return SUPPLY_NAV;
+  if (module === "riders") return RIDERS_NAV;
+  return MAIN_NAV;
+}
 
 export function ModuleTabs() {
   const { activeModule, setActiveModule } = useErpModule();
+  const { user } = useAuth();
   const { can } = usePermissions();
 
+  if (isRiderRole(user)) {
+    return (
+      <div className="flex items-center rounded-lg border border-border bg-muted/40 p-1">
+        <div className="flex items-center gap-2 rounded-md bg-card px-3 py-1.5 text-sm font-medium text-foreground shadow-sm">
+          <Bike className="h-4 w-4 text-brand" />
+          <span className="hidden sm:inline">{MODULE_LABELS.riders}</span>
+        </div>
+      </div>
+    );
+  }
+
   const visibleTabs = TAB_CONFIG.filter((tab) => {
-    const nav = tab.id === "hr" ? MAIN_NAV : SUPPLY_NAV;
-    return filterNav(nav, can).length > 0;
+    const nav = getNavForModule(tab.id);
+    return filterNav(nav, can, user?.role).length > 0;
   });
 
   if (visibleTabs.length <= 1) return null;

@@ -10,8 +10,8 @@ export const authConfig = {
     "JWT_REFRESH_SECRET",
     "dev-refresh-secret-change-in-production-32chars"
   ),
-  jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? "15m",
-  jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? "7d",
+  jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? "1d",
+  jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? "30d",
   bcryptRounds: parseInt(process.env.BCRYPT_ROUNDS ?? "10", 10),
 };
 

@@ -21,6 +21,17 @@ function formatAmount(value?: number) {
   return `${value.toFixed(3)} OMR`;
 }
 
+function resolveItemSellPrice(item: {
+  previousSellingPrice?: number;
+  productId: string | { sellingPrice?: number };
+}): number | undefined {
+  if (item.previousSellingPrice != null) return item.previousSellingPrice;
+  if (typeof item.productId === "object" && item.productId.sellingPrice != null) {
+    return item.productId.sellingPrice;
+  }
+  return undefined;
+}
+
 interface PurchaseOrderDetailModalProps {
   purchaseId: string | null;
   open: boolean;
@@ -94,8 +105,9 @@ export function PurchaseOrderDetailModal({ purchaseId, open, onOpenChange }: Pur
               {po.items.map((item, idx) => {
                 const productId = typeof item.productId === "object" ? item.productId._id : item.productId;
                 const lineTotal = item.quantityOrdered * item.unitCost;
+                const prevSell = resolveItemSellPrice(item);
                 return (
-                  <div key={`${productId}-${idx}`} className="grid gap-2 px-4 py-3 sm:grid-cols-4">
+                  <div key={`${productId}-${idx}`} className="grid gap-2 px-4 py-3 sm:grid-cols-5">
                     <div className="sm:col-span-2">
                       <p className="font-medium">{refName(item.productId)}</p>
                       {typeof item.productId === "object" ? (
@@ -109,9 +121,28 @@ export function PurchaseOrderDetailModal({ purchaseId, open, onOpenChange }: Pur
                       </p>
                     </div>
                     <div>
+                      <p className="text-xs text-muted-foreground">Unit Cost</p>
+                      <p className="text-sm font-medium">{formatAmount(item.unitCost)}</p>
+                      {item.previousPurchaseCost !== undefined ? (
+                        <p className="text-xs text-muted-foreground">
+                          Was {formatAmount(item.previousPurchaseCost)}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Sell Price</p>
+                      <p className="text-sm font-medium">
+                        {formatAmount(item.newSellingPrice ?? prevSell)}
+                      </p>
+                      {prevSell !== undefined ? (
+                        <p className="text-xs text-muted-foreground">
+                          Was {formatAmount(prevSell)}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div>
                       <p className="text-xs text-muted-foreground">Line Total</p>
                       <p className="text-sm font-medium">{formatAmount(lineTotal)}</p>
-                      <p className="text-xs text-muted-foreground">@ {formatAmount(item.unitCost)}</p>
                     </div>
                   </div>
                 );

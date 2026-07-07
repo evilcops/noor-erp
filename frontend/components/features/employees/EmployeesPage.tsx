@@ -10,7 +10,9 @@ import { DataTable, type Column } from "@/components/common/DataTable";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { ConfirmationModal } from "@/components/common/ConfirmationModal";
 import { Button } from "@/components/ui/Button";
+import { BranchSubBranchSelect } from "@/components/common/BranchSubBranchSelect";
 import { Select } from "@/components/ui/Select";
+import { effectiveBranchId } from "@/lib/branch-utils";
 import {
   EmployeeFormModal,
   formToPayload,
@@ -45,12 +47,14 @@ export function EmployeesPage() {
   const deepLinkHandled = useRef(false);
 
   const { user } = useAuth();
-  const { branches, activeBranchId } = useBranch();
+  const { branches, activeMainBranchId, activeSubBranchId, activeBranchId } = useBranch();
   const { can } = usePermissions();
 
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [branchFilter, setBranchFilter] = useState("");
+  const [mainBranchFilter, setMainBranchFilter] = useState("");
+  const [subBranchFilter, setSubBranchFilter] = useState("");
+  const branchFilter = effectiveBranchId(mainBranchFilter, subBranchFilter);
   const [statusFilter, setStatusFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("");
@@ -321,7 +325,22 @@ export function EmployeesPage() {
         <div className="min-w-[200px] flex-1">
           <SearchBar value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Search name, email, ID..." />
         </div>
-        <Select value={branchFilter} onChange={(e) => { setBranchFilter(e.target.value); setPage(1); }} options={[{ value: "", label: "All Branches" }, ...branches.map((b) => ({ value: b._id, label: b.name }))]} className="w-40" />
+        <BranchSubBranchSelect
+          branches={branches}
+          mainBranchId={mainBranchFilter}
+          subBranchId={subBranchFilter}
+          onMainBranchChange={(id) => {
+            setMainBranchFilter(id);
+            setSubBranchFilter("");
+            setPage(1);
+          }}
+          onSubBranchChange={(id) => {
+            setSubBranchFilter(id);
+            setPage(1);
+          }}
+          allowAllMain
+          allMainLabel="All Branches"
+        />
         <Select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} options={STATUS_FILTER} className="w-36" />
         <Select value={typeFilter} onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }} options={TYPE_FILTER} className="w-36" />
         <input

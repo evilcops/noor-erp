@@ -20,3 +20,15 @@ export { StockLevel, type IStockLevel } from "./StockLevel.model";
 export { StockMovement, type IStockMovement, type StockMovementType } from "./StockMovement.model";
 export { StockTransfer, type IStockTransfer, type StockTransferStatus } from "./StockTransfer.model";
 export { Supplier, type ISupplier, type SupplierStatus } from "./Supplier.model";
+export { DeliveryCluster, type IDeliveryCluster } from "./DeliveryCluster.model";
+export { DeliveryRun, type IDeliveryRun, type DeliveryRunStatus } from "./DeliveryRun.model";
+export { Rider, type IRider, type RiderFleetStatus } from "./Rider.model";
+export {
+  Delivery,
+  type IDelivery,
+  type DeliveryStatus,
+  type DeliveryPriority,
+  type WarehouseStatus,
+  type OrderSource,
+} from "./Delivery.model";
+export { RiderJourney, type IRiderJourney, type JourneyStatus } from "./RiderJourney.model";

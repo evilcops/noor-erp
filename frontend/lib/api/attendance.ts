@@ -71,7 +71,7 @@ export const attendanceApi = {
 
   getToday: () => apiRequest<AttendanceRecord[]>("/attendance/today"),
 
-  getMy: (params: { fromDate?: string; toDate?: string; page?: number } = {}) =>
+  getMy: (params: { fromDate?: string; toDate?: string; page?: number; limit?: number } = {}) =>
     apiRequestWithMeta<AttendanceRecord[]>(`/attendance/my${buildQuery(params)}`),
 
   getTeam: () => apiRequest<AttendanceRecord[]>("/attendance/team"),

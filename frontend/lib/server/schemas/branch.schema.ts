@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const createBranchSchema = z.object({
   companyId: z.string().min(1),
+  parentBranchId: z.string().optional().nullable(),
   name: z.string().min(1),
   code: z.string().min(2).max(20),
   address: z.string().optional(),
@@ -10,6 +11,8 @@ export const createBranchSchema = z.object({
   managerId: z.string().optional(),
   gpsCoordinates: z.object({ lat: z.number(), lng: z.number() }).optional(),
   allowedRadius: z.number().min(10).max(5000).optional(),
+  deliveryRadiusKm: z.number().min(1).max(100).optional(),
+  deliveryClusterCount: z.number().min(2).max(24).optional(),
 });
 
 export const updateBranchSchema = createBranchSchema.partial().omit({ companyId: true });

@@ -1,4 +1,4 @@
-import type { Types } from "mongoose";
+import mongoose, { type Types } from "mongoose";
 import type { UserRole } from "../config/constants";
 import { ROLE_PERMISSIONS } from "../config/constants";
 import { User, type IUser } from "../models/User.model";
@@ -7,12 +7,13 @@ import { assertPermission, buildTenantFilter } from "./permission.service";
 import { AppError } from "../utils/AppError";
 
 const MANAGEABLE_ROLES: Record<UserRole, UserRole[]> = {
-  super_admin: ["super_admin", "business_owner", "branch_manager", "hr_manager", "inventory_manager", "procurement_manager", "employee"],
-  business_owner: ["business_owner", "branch_manager", "hr_manager", "inventory_manager", "procurement_manager", "employee"],
-  branch_manager: ["employee"],
-  hr_manager: ["employee"],
-  inventory_manager: ["employee"],
-  procurement_manager: ["employee"],
+  super_admin: ["super_admin", "business_owner", "branch_manager", "hr_manager", "inventory_manager", "procurement_manager", "rider", "employee"],
+  business_owner: ["business_owner", "branch_manager", "hr_manager", "inventory_manager", "procurement_manager", "rider", "employee"],
+  branch_manager: ["employee", "rider"],
+  hr_manager: ["employee", "rider"],
+  inventory_manager: ["employee", "rider"],
+  procurement_manager: ["employee", "rider"],
+  rider: [],
   employee: [],
 };
 
@@ -161,7 +162,11 @@ export async function updateUser(
   if (input.lastName) user.lastName = input.lastName;
   if (input.phone !== undefined) user.phone = input.phone;
   if (input.isActive !== undefined) user.isActive = input.isActive;
-  if (input.branchId !== undefined) user.branchId = input.branchId as Types.ObjectId | undefined;
+  if (input.branchId !== undefined) {
+    user.branchId = input.branchId
+      ? new mongoose.Types.ObjectId(input.branchId)
+      : undefined;
+  }
   if (input.password) user.password = await hashPassword(input.password);
 
   if (input.useCustomPermissions !== undefined) {

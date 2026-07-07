@@ -12,7 +12,7 @@ interface ModalProps {
   children: React.ReactNode;
   size?: "sm" | "md" | "lg" | "xl" | "full";
   footer?: React.ReactNode;
-  /** Override z-index for both overlay and content (default: 50) */
+  /** Override z-index for overlay (content uses overlay + 1). Default 1100 — above Leaflet maps. */
   zIndex?: number;
 }
 
@@ -23,6 +23,8 @@ const sizes = {
   xl: "max-w-4xl",
   full: "max-w-[95vw]",
 };
+
+const MODAL_Z_INDEX = 1100;
 
 export function Modal({
   open,
@@ -39,10 +41,10 @@ export function Modal({
       <Dialog.Portal>
         <Dialog.Overlay
           className="fixed inset-0 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out"
-          style={zIndex !== undefined ? { zIndex } : { zIndex: 50 }}
+          style={{ zIndex: zIndex ?? MODAL_Z_INDEX }}
         />
         <Dialog.Content
-          style={zIndex !== undefined ? { zIndex } : { zIndex: 50 }}
+          style={{ zIndex: (zIndex ?? MODAL_Z_INDEX) + 1 }}
           className={cn(
             "fixed left-1/2 top-1/2 flex max-h-[90vh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-border bg-card shadow-xl",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",

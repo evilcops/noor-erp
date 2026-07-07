@@ -12,10 +12,11 @@ import {
   Warehouse,
 } from "lucide-react";
 import { PageHeader } from "@/components/common/PageHeader";
-import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Button } from "@/components/ui/Button";
-import { Select } from "@/components/ui/Select";
+import { BranchSubBranchSelect } from "@/components/common/BranchSubBranchSelect";
+import { effectiveBranchId } from "@/lib/branch-utils";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { useAuth, useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { inventoryApi } from "@/lib/api/inventory";
@@ -43,11 +44,88 @@ function restockHref(item: StockLevel) {
   return `/purchases?${params}`;
 }
 
+function SupplyDashboardSkeleton() {
+  return (
+    <div className="space-y-6" aria-busy="true" aria-label="Loading supply dashboard">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-52" />
+          <Skeleton className="h-4 w-80 max-w-full" />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Skeleton className="h-10 w-48" />
+          <Skeleton className="h-10 w-24" />
+          <Skeleton className="h-10 w-36" />
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 7 }).map((_, i) => (
+          <div key={i} className="rounded-xl border border-border bg-card p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-5 w-5 rounded-full" />
+            </div>
+            <Skeleton className="mt-3 h-8 w-14" />
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <Skeleton className="h-6 w-40" />
+          <Skeleton className="h-9 w-36" />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+          {Array.from({ length: 7 }).map((_, i) => (
+            <Skeleton key={i} className="h-20 w-full rounded-lg" />
+          ))}
+        </div>
+        <div className="mt-4 space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-12 w-full rounded-lg" />
+          ))}
+        </div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <div key={i} className="rounded-xl border border-border bg-card p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <Skeleton className="h-6 w-32" />
+              <Skeleton className="h-8 w-28" />
+            </div>
+            <div className="space-y-2">
+              {Array.from({ length: 4 }).map((_, j) => (
+                <Skeleton key={j} className="h-16 w-full rounded-lg" />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <Skeleton className="h-6 w-44" />
+          <Skeleton className="h-8 w-24" />
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-14 w-full rounded-lg" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function SupplyDashboardPage() {
   const { user } = useAuth();
-  const { branches, activeBranchId } = useBranch();
+  const { branches, activeMainBranchId, activeSubBranchId } = useBranch();
   const { can } = usePermissions();
-  const [branchFilter, setBranchFilter] = useState(activeBranchId ?? "");
+  const [mainBranchFilter, setMainBranchFilter] = useState(activeMainBranchId ?? "");
+  const [subBranchFilter, setSubBranchFilter] = useState(activeSubBranchId ?? "");
+  const branchFilter = effectiveBranchId(mainBranchFilter, subBranchFilter);
 
   const { data: d, isLoading } = useQuery({
     queryKey: ["inventory-dashboard", branchFilter],
@@ -55,7 +133,7 @@ export function SupplyDashboardPage() {
     enabled: !!user,
   });
 
-  if (isLoading) return <LoadingSpinner className="py-20" />;
+  if (isLoading) return <SupplyDashboardSkeleton />;
 
   const lowStock = d?.lowStock ?? [];
   const outOfStock = d?.outOfStock ?? [];
@@ -67,11 +145,16 @@ export function SupplyDashboardPage() {
         description="Inventory and supply chain overview across branches"
         actions={
           <div className="flex flex-wrap gap-2">
-            <Select
-              value={branchFilter}
-              onChange={(e) => setBranchFilter(e.target.value)}
-              className="w-48"
-              options={[{ value: "", label: "All branches" }, ...branches.map((b) => ({ value: b._id, label: b.name }))]}
+            <BranchSubBranchSelect
+              branches={branches}
+              mainBranchId={mainBranchFilter}
+              subBranchId={subBranchFilter}
+              onMainBranchChange={(id) => {
+                setMainBranchFilter(id);
+                setSubBranchFilter("");
+              }}
+              onSubBranchChange={setSubBranchFilter}
+              allowAllMain
             />
             <Link href="/products"><Button variant="secondary">Products</Button></Link>
             <Link href="/purchases"><Button>Purchase Orders</Button></Link>

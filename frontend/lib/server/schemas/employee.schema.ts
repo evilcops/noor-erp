@@ -30,7 +30,24 @@ const familyMemberSchema = z.object({
   bataka: familyMemberBatakaSchema.optional(),
 });
 
-const userAccountRefine = (data: { createUserAccount?: boolean; userPassword?: string }, ctx: z.RefinementCtx) => {
+const userAccountRefine = (
+  data: { createUserAccount?: boolean; userPassword?: string; registerAsRider?: boolean },
+  ctx: z.RefinementCtx
+) => {
+  if (data.registerAsRider && !data.createUserAccount) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["createUserAccount"],
+      message: "Riders must have a login account",
+    });
+  }
+  if ((data.createUserAccount || data.registerAsRider) && !data.userPassword) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["userPassword"],
+      message: "Password is required when creating a rider login",
+    });
+  }
   if (data.createUserAccount && !data.userPassword) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -50,7 +67,10 @@ const familyMembersRefine = (
   if (!data.familyMembers?.length || !data.gender) return;
 
   const normalizedMembers = normalizeFamilyMembers(
-    data.familyMembers as Array<{ name: string; relationship: string }>
+    data.familyMembers.map((member) => ({
+      name: member.name,
+      relationship: member.relationship as import("@/types/employee").FamilyRelationship,
+    }))
   );
 
   for (const issue of validateFamilyMembers(normalizedMembers, data.gender)) {
@@ -106,6 +126,15 @@ const employeeBodySchema = z.object({
   createUserAccount: z.boolean().optional(),
   userPassword: z.string().min(8).optional(),
   userRole: z.enum(ROLES).optional(),
+  registerAsRider: z.boolean().optional(),
+  riderVehicle: z
+    .object({
+      make: z.string().optional(),
+      model: z.string().optional(),
+      plate: z.string().optional(),
+      whatsappPhone: z.string().optional(),
+    })
+    .optional(),
   leaveBalance: leaveBalanceSchema,
 });
 

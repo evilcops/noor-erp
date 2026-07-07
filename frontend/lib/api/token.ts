@@ -1,7 +1,7 @@
 const ACCESS_KEY = "noor_access_token";
 const REFRESH_KEY = "noor_refresh_token";
 const ACCESS_COOKIE = "noor_api_access";
-const ACCESS_MAX_AGE = 15 * 60; // 15 minutes, matches default JWT access TTL
+const ACCESS_MAX_AGE = 24 * 60 * 60; // 1 day — matches JWT access token TTL
 
 export function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;

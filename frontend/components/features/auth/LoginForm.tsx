@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
 import { authApi } from "@/lib/api/auth";
+import { getDefaultHomePath, isRiderAllowedPath } from "@/config/modules";
 import { useAuth } from "@/hooks";
 
 export function LoginForm() {
@@ -23,10 +24,13 @@ export function LoginForm() {
     setLoading(true);
 
     try {
-      await authApi.login(email, password);
+      const result = await authApi.login(email, password);
       await refreshUser();
       toast.success("Welcome back!");
-      const redirectTo = searchParams.get("from") || "/";
+      const from = searchParams.get("from");
+      const defaultPath = getDefaultHomePath(result.user.role);
+      const redirectTo =
+        from && (result.user.role !== "rider" || isRiderAllowedPath(from)) ? from : defaultPath;
       window.location.href = redirectTo;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Login failed";

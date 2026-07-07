@@ -10,11 +10,31 @@ export type PurchaseStatus =
   | "closed";
 
 export interface PurchaseOrderItem {
-  productId: string | { _id: string; name: string; sku: string; unitOfMeasure?: string };
+  productId:
+    | string
+    | {
+        _id: string;
+        name: string;
+        sku: string;
+        unitOfMeasure?: string;
+        purchaseCost?: number;
+        sellingPrice?: number;
+      };
   quantityOrdered: number;
   quantityReceived: number;
   unitCost: number;
+  previousPurchaseCost?: number;
+  previousSellingPrice?: number;
+  newPurchaseCost?: number;
+  newSellingPrice?: number;
   notes?: string;
+}
+
+export interface AmendPurchaseItemInput {
+  productId: string;
+  quantityOrdered?: number;
+  newPurchaseCost?: number;
+  newSellingPrice?: number;
 }
 
 export interface PurchaseOrder {

@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { MAIN_NAV, SETTINGS_NAV, SUPPLY_NAV, isNavActive } from "@/config/site";
+import { MAIN_NAV, SETTINGS_NAV, SUPPLY_NAV, RIDERS_NAV, isNavActive } from "@/config/site";
+import type { NavItem } from "@/config/site";
 import { MODULE_SIDEBAR_LABELS } from "@/config/modules";
 import { useErpModule } from "@/components/providers/ModuleProvider";
 import { useAuth } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
-import { isEmployeeRole } from "@/lib/permissions";
+import { isEmployeeRole, isRiderRole } from "@/lib/permissions";
+import type { UserRole } from "@/types/auth-user";
 import { cn } from "@/lib/utils";
 
 interface SidebarProps {
@@ -15,11 +17,18 @@ interface SidebarProps {
   collapsed?: boolean;
 }
 
-function filterNav<T extends { permission?: string }>(
-  items: T[],
-  can: (permission: string) => boolean
-): T[] {
-  return items.filter((item) => !item.permission || can(item.permission));
+function filterNav(
+  items: NavItem[],
+  can: (permission: string) => boolean,
+  userRole?: UserRole
+): NavItem[] {
+  return items.filter((item) => {
+    if (item.roles?.length) {
+      return userRole ? item.roles.includes(userRole) : false;
+    }
+    if (item.permission && !can(item.permission)) return false;
+    return true;
+  });
 }
 
 function NavSection({
@@ -83,9 +92,18 @@ export function Sidebar({ onNavigate, collapsed = false }: SidebarProps) {
   const { can } = usePermissions();
   const { activeModule } = useErpModule();
   const employeeView = isEmployeeRole(user);
+  const riderView = isRiderRole(user);
 
-  const moduleNav = filterNav(activeModule === "inventory" ? SUPPLY_NAV : MAIN_NAV, can);
-  const settingsNav = filterNav(SETTINGS_NAV, can);
+  const moduleNav = filterNav(
+    riderView || activeModule === "riders"
+      ? RIDERS_NAV
+      : activeModule === "inventory"
+        ? SUPPLY_NAV
+        : MAIN_NAV,
+    can,
+    user?.role
+  );
+  const settingsNav = riderView ? [] : filterNav(SETTINGS_NAV, can, user?.role);
 
   return (
     <aside
@@ -95,7 +113,19 @@ export function Sidebar({ onNavigate, collapsed = false }: SidebarProps) {
       )}
     >
       <div className={cn("flex h-16 items-center border-b border-border", collapsed ? "justify-center px-2" : "px-5")}>
-        <Link href={activeModule === "inventory" ? "/supply" : "/"} className="flex items-center gap-3" onClick={onNavigate}>
+        <Link
+          href={
+            riderView
+              ? "/riders"
+              : activeModule === "inventory"
+                ? "/supply"
+                : activeModule === "riders"
+                  ? "/dispatch"
+                  : "/"
+          }
+          className="flex items-center gap-3"
+          onClick={onNavigate}
+        >
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand text-sm font-bold text-brand-foreground">
             N
           </div>
@@ -115,7 +145,13 @@ export function Sidebar({ onNavigate, collapsed = false }: SidebarProps) {
           collapsed={collapsed}
           employeeView={employeeView}
           onNavigate={onNavigate}
-          sectionLabel={activeModule === "inventory" ? "Inventory" : "Main"}
+          sectionLabel={
+            riderView || activeModule === "riders"
+              ? "Deliveries"
+              : activeModule === "inventory"
+                ? "Inventory"
+                : "Main"
+          }
         />
 
         <NavSection

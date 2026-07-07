@@ -12,7 +12,9 @@ import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
+import { BranchSubBranchSelect } from "@/components/common/BranchSubBranchSelect";
 import { Select } from "@/components/ui/Select";
+import { resolveMainAndSubBranchId } from "@/lib/branch-utils";
 import { useAuth, useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { purchaseApi } from "@/lib/api/purchases";
@@ -20,7 +22,37 @@ import { supplierApi } from "@/lib/api/suppliers";
 import { productApi } from "@/lib/api/products";
 import { PurchasePipeline } from "@/components/features/purchases/PurchasePipeline";
 import { ReceiptActions } from "@/components/features/orders/ReceiptActions";
-import type { PurchaseOrder } from "@/types/purchase";
+import type { AmendPurchaseItemInput, PurchaseOrder } from "@/types/purchase";
+
+function formatPrice(value?: number) {
+  if (value === undefined || value === null) return "";
+  return value.toFixed(3);
+}
+
+function resolveItemSellPrice(item: PurchaseOrder["items"][number]): number | undefined {
+  if (item.previousSellingPrice != null) return item.previousSellingPrice;
+  if (typeof item.productId === "object" && item.productId.sellingPrice != null) {
+    return item.productId.sellingPrice;
+  }
+  return undefined;
+}
+
+function resolveItemPurchasePrice(item: PurchaseOrder["items"][number]): number | undefined {
+  if (item.previousPurchaseCost != null) return item.previousPurchaseCost;
+  if (typeof item.productId === "object" && item.productId.purchaseCost != null) {
+    return item.productId.purchaseCost;
+  }
+  return item.unitCost;
+}
+
+type DraftLineItem = {
+  productId: string;
+  quantityOrdered: number;
+  unitCost: number;
+  previousSellingPrice: number;
+};
+
+const AMENDABLE_STATUSES = new Set(["ordered", "in_transit", "partially_received"]);
 
 function refName(ref: string | { name?: string } | undefined) {
   if (!ref || typeof ref === "string") return ref ?? "—";
@@ -45,10 +77,12 @@ export function PurchasesPage() {
   const [productId, setProductId] = useState("");
   const [qty, setQty] = useState("1");
   const [unitCost, setUnitCost] = useState("");
-  const [items, setItems] = useState<{ productId: string; quantityOrdered: number; unitCost: number }[]>([]);
+  const [sellingPrice, setSellingPrice] = useState("");
+  const [items, setItems] = useState<DraftLineItem[]>([]);
   const [receiveQtys, setReceiveQtys] = useState<Record<string, string>>({});
+  const [amendItems, setAmendItems] = useState<Record<string, AmendPurchaseItemInput>>({});
 
-  const companyId = user?.companyId ?? "";
+  const companyId = user?.companyId ?? branches[0]?.companyId ?? "";
 
   const { data, isLoading } = useQuery({
     queryKey: ["purchases", page, statusFilter],
@@ -104,6 +138,23 @@ export function PurchasesPage() {
     enabled: !!user,
   });
 
+  const { data: selectedProduct } = useQuery({
+    queryKey: ["product", productId, "po-form"],
+    queryFn: () => productApi.get(productId),
+    enabled: !!productId && formOpen,
+  });
+
+  useEffect(() => {
+    if (!productId) {
+      setUnitCost("");
+      setSellingPrice("");
+      return;
+    }
+    if (!selectedProduct) return;
+    setUnitCost(selectedProduct.purchaseCost != null ? String(selectedProduct.purchaseCost) : "");
+    setSellingPrice(selectedProduct.sellingPrice != null ? String(selectedProduct.sellingPrice) : "");
+  }, [productId, selectedProduct]);
+
   useEffect(() => {
     if (restockHandled.current) return;
     const productIdParam = searchParams.get("productId");
@@ -117,13 +168,17 @@ export function PurchasesPage() {
     if (qtyParam) setQty(qtyParam);
 
     const product = (productsData?.data ?? []).find((p) => p._id === productIdParam);
-    if (product?.purchaseCost) setUnitCost(String(product.purchaseCost));
+    if (product) {
+      setUnitCost(String(product.purchaseCost ?? 0));
+      setSellingPrice(String(product.sellingPrice ?? 0));
+    }
     if (product && qtyParam) {
       setItems([
         {
           productId: productIdParam,
           quantityOrdered: Number(qtyParam) || 1,
-          unitCost: product.purchaseCost ?? 0,
+          unitCost: product?.purchaseCost ?? 0,
+          previousSellingPrice: product?.sellingPrice ?? 0,
         },
       ]);
     }
@@ -135,7 +190,17 @@ export function PurchasesPage() {
   }, [searchParams, productsData?.data, canCreatePurchase]);
 
   const createMut = useMutation({
-    mutationFn: () => purchaseApi.create({ companyId, branchId, supplierId, items }),
+    mutationFn: () =>
+      purchaseApi.create({
+        companyId,
+        branchId,
+        supplierId,
+        items: items.map((i) => ({
+          productId: i.productId,
+          quantityOrdered: i.quantityOrdered,
+          unitCost: i.unitCost,
+        })),
+      }),
     onSuccess: async (created) => {
       toast.success("Purchase order created");
       setFormOpen(false);
@@ -146,6 +211,26 @@ export function PurchasesPage() {
       void qc.invalidateQueries({ queryKey: ["purchases"] });
       void qc.invalidateQueries({ queryKey: ["purchases-pipeline"] });
       void qc.invalidateQueries({ queryKey: ["inventory-dashboard"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const amendMut = useMutation({
+    mutationFn: () => {
+      if (!selected) return Promise.reject(new Error("No purchase order selected"));
+      return purchaseApi.amend(selected._id, Object.values(amendItems));
+    },
+    onSuccess: async () => {
+      toast.success("Purchase order and product prices updated");
+      if (selected) {
+        const updated = await purchaseApi.get(selected._id);
+        setSelected(updated);
+        initAmendItems(updated);
+      }
+      void qc.invalidateQueries({ queryKey: ["purchases"] });
+      void qc.invalidateQueries({ queryKey: ["purchases-pipeline"] });
+      void qc.invalidateQueries({ queryKey: ["products-active"] });
+      void qc.invalidateQueries({ queryKey: ["products"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -171,6 +256,7 @@ export function PurchasesPage() {
       if (selected) {
         const updated = await purchaseApi.get(selected._id);
         setSelected(updated);
+        initAmendItems(updated);
       }
       void qc.invalidateQueries({ queryKey: ["purchases"] });
       void qc.invalidateQueries({ queryKey: ["purchases-pipeline"] });
@@ -179,6 +265,21 @@ export function PurchasesPage() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const initAmendItems = (po: PurchaseOrder) => {
+    const next: Record<string, AmendPurchaseItemInput> = {};
+    po.items.forEach((item) => {
+      const id = typeof item.productId === "object" ? item.productId._id : item.productId;
+      const prevSell = resolveItemSellPrice(item);
+      next[id] = {
+        productId: id,
+        quantityOrdered: item.quantityOrdered,
+        newPurchaseCost: item.newPurchaseCost ?? item.unitCost,
+        newSellingPrice: item.newSellingPrice ?? prevSell,
+      };
+    });
+    setAmendItems(next);
+  };
 
   const openDetail = async (po: PurchaseOrder) => {
     const full = await purchaseApi.get(po._id);
@@ -190,15 +291,30 @@ export function PurchasesPage() {
       qtys[id] = String(remaining);
     });
     setReceiveQtys(qtys);
+    initAmendItems(full);
     setDetailOpen(true);
   };
 
+  const handleProductSelect = (id: string) => {
+    setProductId(id);
+  };
+
   const addItem = () => {
-    if (!productId || !qty || !unitCost) return;
-    setItems([...items, { productId, quantityOrdered: Number(qty), unitCost: Number(unitCost) }]);
+    if (!productId || !qty || unitCost === "") return;
+    const sell = selectedProduct?.sellingPrice ?? (sellingPrice !== "" ? Number(sellingPrice) : 0);
+    setItems([
+      ...items,
+      {
+        productId,
+        quantityOrdered: Number(qty),
+        unitCost: Number(unitCost),
+        previousSellingPrice: sell,
+      },
+    ]);
     setProductId("");
     setQty("1");
     setUnitCost("");
+    setSellingPrice("");
   };
 
   const columns: Column<PurchaseOrder>[] = useMemo(
@@ -266,11 +382,17 @@ export function PurchasesPage() {
 
       <Modal open={formOpen} onOpenChange={setFormOpen} title="New Purchase Order" size="lg">
         <div className="grid gap-4 sm:grid-cols-2">
-          <div><Label>Branch</Label>
-            <Select
-              value={branchId}
-              onChange={(e) => setBranchId(e.target.value)}
-              options={branches.map((b) => ({ value: b._id, label: b.name }))}
+          <div className="sm:col-span-2">
+            <Label>Branch</Label>
+            <BranchSubBranchSelect
+              branches={branches}
+              mainBranchId={resolveMainAndSubBranchId(branchId, branches).mainId}
+              subBranchId={resolveMainAndSubBranchId(branchId, branches).subId}
+              onMainBranchChange={(id) => setBranchId(id)}
+              onSubBranchChange={(id) => {
+                const mainId = resolveMainAndSubBranchId(branchId, branches).mainId;
+                setBranchId(id || mainId);
+              }}
             />
           </div>
           <div><Label>Supplier *</Label>
@@ -284,22 +406,63 @@ export function PurchasesPage() {
         </div>
         <div className="mt-4 rounded-lg border p-4">
           <p className="mb-3 text-sm font-medium">Line Items</p>
-          <div className="grid gap-2 sm:grid-cols-4">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
             <Select
               value={productId}
-              onChange={(e) => setProductId(e.target.value)}
+              onChange={(e) => handleProductSelect(e.target.value)}
               placeholder="Product"
               options={(productsData?.data ?? []).map((p) => ({ value: p._id, label: p.name }))}
             />
-            <Input type="number" placeholder="Qty" value={qty} onChange={(e) => setQty(e.target.value)} />
-            <Input type="number" placeholder="Unit cost" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} />
-            <Button type="button" variant="secondary" onClick={addItem}>Add</Button>
+            <Input type="number" min={1} placeholder="Qty" value={qty} onChange={(e) => setQty(e.target.value)} />
+            <div>
+              <Input
+                type="text"
+                placeholder="Purchase price"
+                value={
+                  selectedProduct?.purchaseCost != null
+                    ? formatPrice(selectedProduct.purchaseCost)
+                    : unitCost !== ""
+                      ? formatPrice(Number(unitCost))
+                      : ""
+                }
+                readOnly
+                className="bg-muted/50"
+              />
+              <p className="mt-0.5 text-xs text-muted-foreground">Purchase price (OMR)</p>
+            </div>
+            <div>
+              <Input
+                type="text"
+                placeholder="Sell price"
+                value={
+                  selectedProduct?.sellingPrice != null
+                    ? formatPrice(selectedProduct.sellingPrice)
+                    : sellingPrice !== ""
+                      ? formatPrice(Number(sellingPrice))
+                      : ""
+                }
+                readOnly
+                className="bg-muted/50"
+              />
+              <p className="mt-0.5 text-xs text-muted-foreground">Sell price (OMR)</p>
+              {productId && selectedProduct && selectedProduct.sellingPrice == null ? (
+                <p className="mt-0.5 text-xs text-amber-600">No sell price on product — set it under Products</p>
+              ) : null}
+            </div>
+            <Button type="button" variant="secondary" onClick={addItem} disabled={!productId || !qty}>
+              Add
+            </Button>
           </div>
           {items.length > 0 ? (
             <ul className="mt-3 space-y-1 text-sm">
               {items.map((i, idx) => {
                 const p = (productsData?.data ?? []).find((x) => x._id === i.productId);
-                return <li key={idx}>{p?.name} × {i.quantityOrdered} @ {i.unitCost} OMR</li>;
+                return (
+                  <li key={idx}>
+                    {p?.name} × {i.quantityOrdered} · purchase {formatPrice(i.unitCost)} OMR · sell{" "}
+                    {formatPrice(i.previousSellingPrice)} OMR
+                  </li>
+                );
               })}
             </ul>
           ) : null}
@@ -317,21 +480,133 @@ export function PurchasesPage() {
               <StatusBadge status={selected.status} />
               <span className="text-sm text-muted-foreground">{refName(selected.supplierId)} · {refName(selected.branchId)}</span>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-3">
               {selected.items.map((item) => {
                 const id = typeof item.productId === "object" ? item.productId._id : item.productId;
                 const name = typeof item.productId === "object" ? item.productId.name : id;
+                const canAmend = AMENDABLE_STATUSES.has(selected.status);
+                const amend = amendItems[id];
+                const prevPurchase = resolveItemPurchasePrice(item);
+                const prevSell = resolveItemSellPrice(item);
+
                 return (
-                  <div key={id} className="flex items-center justify-between rounded border px-3 py-2 text-sm">
-                    <span>{name}</span>
-                    <span>{item.quantityReceived}/{item.quantityOrdered} @ {item.unitCost} OMR</span>
-                    {["in_transit", "partially_received", "ordered"].includes(selected.status) ? (
-                      <Input className="w-20" type="number" value={receiveQtys[id] ?? ""} onChange={(e) => setReceiveQtys({ ...receiveQtys, [id]: e.target.value })} />
-                    ) : null}
+                  <div key={id} className="rounded-lg border p-3 text-sm space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-medium">{name}</span>
+                      <span>
+                        {item.quantityReceived}/{item.quantityOrdered} @ {formatPrice(item.unitCost)} OMR
+                      </span>
+                      {["in_transit", "partially_received", "ordered"].includes(selected.status) ? (
+                        <Input
+                          className="w-20"
+                          type="number"
+                          value={receiveQtys[id] ?? ""}
+                          onChange={(e) => setReceiveQtys({ ...receiveQtys, [id]: e.target.value })}
+                          placeholder="Recv"
+                        />
+                      ) : null}
+                    </div>
+
+                    {canAmend && amend ? (
+                      <div className="grid gap-3 rounded-md bg-muted/30 p-3 sm:grid-cols-2">
+                        <div>
+                          <Label className="text-xs">Previous purchase price (OMR)</Label>
+                          <Input
+                            readOnly
+                            value={formatPrice(prevPurchase)}
+                            className="mt-1 bg-muted/50"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Previous sell price (OMR)</Label>
+                          <Input
+                            readOnly
+                            value={formatPrice(prevSell)}
+                            className="mt-1 bg-muted/50"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">New purchase price (OMR)</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            step="0.001"
+                            className="mt-1"
+                            value={amend.newPurchaseCost ?? ""}
+                            onChange={(e) =>
+                              setAmendItems({
+                                ...amendItems,
+                                [id]: {
+                                  ...amend,
+                                  newPurchaseCost: e.target.value === "" ? undefined : Number(e.target.value),
+                                },
+                              })
+                            }
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">New sell price (OMR)</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            step="0.001"
+                            className="mt-1"
+                            value={amend.newSellingPrice ?? ""}
+                            onChange={(e) =>
+                              setAmendItems({
+                                ...amendItems,
+                                [id]: {
+                                  ...amend,
+                                  newSellingPrice: e.target.value === "" ? undefined : Number(e.target.value),
+                                },
+                              })
+                            }
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <Label className="text-xs">Ordered quantity</Label>
+                          <Input
+                            type="number"
+                            min={item.quantityReceived || 1}
+                            className="mt-1 max-w-xs"
+                            value={amend.quantityOrdered ?? item.quantityOrdered}
+                            onChange={(e) =>
+                              setAmendItems({
+                                ...amendItems,
+                                [id]: {
+                                  ...amend,
+                                  quantityOrdered: Number(e.target.value),
+                                },
+                              })
+                            }
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                        <span>Purchase: {formatPrice(prevPurchase) || "—"} OMR</span>
+                        <span>Sell: {formatPrice(prevSell) || "—"} OMR</span>
+                        {item.newPurchaseCost !== undefined ? (
+                          <span>New purchase: {formatPrice(item.newPurchaseCost)} OMR</span>
+                        ) : null}
+                        {item.newSellingPrice !== undefined ? (
+                          <span>New sell: {formatPrice(item.newSellingPrice)} OMR</span>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
+            {selected && AMENDABLE_STATUSES.has(selected.status) && can("purchase:edit") ? (
+              <Button
+                variant="secondary"
+                disabled={amendMut.isPending}
+                onClick={() => amendMut.mutate()}
+              >
+                Save price &amp; quantity updates
+              </Button>
+            ) : null}
             <ReceiptActions purchase={selected} className="border-t border-border pt-4" />
             <div className="flex flex-wrap gap-2">
               {(workflowActions[selected.status] ?? []).map((a) =>

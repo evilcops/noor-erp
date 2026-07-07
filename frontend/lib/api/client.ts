@@ -90,7 +90,8 @@ export async function apiRequest<T>(
 
 export async function apiRequestWithMeta<T>(
   path: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  retry = true
 ): Promise<{ data: T; meta?: { page: number; limit: number; total: number; totalPages: number } }> {
   const token = getAccessToken();
   const headers = new Headers(options.headers);
@@ -100,6 +101,18 @@ export async function apiRequestWithMeta<T>(
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
   const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+
+  if (res.status === 401 && retry) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      return apiRequestWithMeta<T>(path, options, false);
+    }
+    if (typeof window !== "undefined") {
+      window.location.href = "/login?expired=1";
+    }
+    throw new ApiClientError("Session expired", "UNAUTHORIZED", 401);
+  }
+
   const json = (await res.json()) as ApiResponse<T> & { meta?: { page: number; limit: number; total: number; totalPages: number } };
 
   if (!json.success) {

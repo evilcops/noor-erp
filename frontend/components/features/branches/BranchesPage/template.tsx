@@ -17,9 +17,9 @@ import { Modal } from "@/components/ui/Modal";
 import { Select } from "@/components/ui/Select";
 import { BranchFormModal } from "@/components/features/branches/BranchFormModal";
 import { branchDocApi } from "@/lib/api/branchDocuments";
+import type { BranchDocument, BranchDocType } from "@/types/documents";
 import { getAccessToken } from "@/lib/api/token";
 import type { BranchesPageTemplateProps } from "./script";
-import type { BranchDocument } from "@/types/documents";
 import type { Branch } from "@/types/branch";
 import { formatDate } from "@/lib/date";
 import styles from "./style.module.css";
@@ -214,9 +214,11 @@ function BranchDocumentsPanel({ branch, canEdit, onClose, initialDocumentId, onD
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      const payload = {
-        ...form,
-        branchId: branch._id,
+      const payload: Partial<BranchDocument> = {
+        type: form.type as BranchDocType,
+        issuanceDate: form.issuanceDate,
+        expiryDate: form.expiryDate,
+        notes: form.notes,
         customTypeName: form.type === "custom" ? form.customTypeName : undefined,
       };
       const saved = selected
@@ -448,6 +450,10 @@ export function BranchesPageTemplate({
   setStatusFilter,
   formOpen,
   setFormOpen,
+  defaultParentBranchId,
+  setDefaultParentBranchId,
+  typeFilter,
+  setTypeFilter,
   deleteOpen,
   setDeleteOpen,
   selected,
@@ -513,11 +519,11 @@ export function BranchesPageTemplate({
     <div className={styles.root}>
       <PageHeader
         title="Branches"
-        description="Manage branch locations, GPS attendance zones, and branch compliance documents."
+        description="Manage main branches and sub-branches — each can have its own warehouse location, stock, and attendance zone."
         breadcrumbs={[{ label: "Dashboard", href: "/" }, { label: "Settings" }, { label: "Branches" }]}
         actions={
           canCreate ? (
-            <Button onClick={() => { setSelected(null); setFormOpen(true); }}>
+            <Button onClick={() => { setSelected(null); setDefaultParentBranchId(""); setFormOpen(true); }}>
               <Plus className="mr-2 h-4 w-4" />Add Branch
             </Button>
           ) : undefined
@@ -535,6 +541,13 @@ export function BranchesPageTemplate({
         <div className={styles.search}>
           <SearchBar value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Search name or code..." />
         </div>
+        <Select value={typeFilter} onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }}
+          options={[
+            { value: "", label: "All types" },
+            { value: "main", label: "Main branches" },
+            { value: "sub", label: "Sub-branches" },
+          ]}
+          className="w-40" />
         <Select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
           options={[{ value: "", label: "All Status" }, { value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }]}
           className="w-36" />
@@ -553,8 +566,15 @@ export function BranchesPageTemplate({
 
       <BranchFormModal
         open={formOpen}
-        onOpenChange={(o) => { setFormOpen(o); if (!o) setSelected(null); }}
+        onOpenChange={(o) => {
+          setFormOpen(o);
+          if (!o) {
+            setSelected(null);
+            setDefaultParentBranchId("");
+          }
+        }}
         branch={selected}
+        defaultParentBranchId={defaultParentBranchId}
         onSubmit={handleSubmit}
         loading={formLoading}
       />
@@ -562,9 +582,9 @@ export function BranchesPageTemplate({
       <ConfirmationModal
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        title="Archive Branch"
-        description={`Archive "${selected?.name}"? Employees linked to this branch will remain but the branch will be marked inactive.`}
-        confirmLabel="Archive"
+        title="Delete Branch"
+        description={`Permanently delete "${selected?.name}"? All delivery zones and sub-branches under this branch will be removed. This cannot be undone.`}
+        confirmLabel="Delete"
         variant="danger"
         loading={deleteLoading}
         onConfirm={handleDelete}

@@ -5,6 +5,7 @@ import { Employee } from "../models/Employee.model";
 import type { ComplianceDocType } from "../models/Employee.model";
 import { generateEmployeeId } from "../services/auth.service";
 import { createUserForEmployee } from "../services/employee-user.service";
+import { createRiderForEmployee, syncRiderFromEmployee } from "../services/rider-employee.service";
 import {
   createLeaveBalanceForEmployee,
   formatLeaveBalance,
@@ -89,6 +90,8 @@ export async function createEmployee(req: Request, res: Response) {
     createUserAccount,
     userPassword,
     userRole,
+    registerAsRider,
+    riderVehicle,
     leaveBalance,
     ...rest
   } = req.body as {
@@ -97,6 +100,8 @@ export async function createEmployee(req: Request, res: Response) {
     createUserAccount?: boolean;
     userPassword?: string;
     userRole?: import("../config/constants").UserRole;
+    registerAsRider?: boolean;
+    riderVehicle?: { make?: string; model?: string; plate?: string; whatsappPhone?: string };
     leaveBalance?: LeaveBalanceInput;
     [key: string]: unknown;
   };
@@ -124,12 +129,25 @@ export async function createEmployee(req: Request, res: Response) {
     updatedBy: req.user!._id,
   });
 
-  if (createUserAccount && userPassword) {
+  if (registerAsRider && !(userPassword && userPassword.length >= 8)) {
+    throw new AppError("BAD_REQUEST", "Riders require a login password (min. 8 characters)", 400);
+  }
+
+  if (createUserAccount || registerAsRider) {
     await createUserForEmployee(req.user!, employee, {
-      password: userPassword,
-      role: userRole,
+      password: userPassword!,
+      role: registerAsRider ? "rider" : userRole,
     });
     await employee.populate("userId");
+  }
+
+  if (registerAsRider) {
+    await createRiderForEmployee(employee, req.user!._id, {
+      vehicleMake: riderVehicle?.make,
+      vehicleModel: riderVehicle?.model,
+      vehiclePlate: riderVehicle?.plate,
+      whatsappPhone: riderVehicle?.whatsappPhone ?? employee.phone,
+    });
   }
 
   if (!leaveBalance) {
@@ -199,6 +217,8 @@ export async function updateEmployee(req: Request, res: Response) {
     createUserAccount,
     userPassword,
     userRole,
+    registerAsRider,
+    riderVehicle,
     leaveBalance,
     ...rest
   } = req.body as {
@@ -215,6 +235,8 @@ export async function updateEmployee(req: Request, res: Response) {
     createUserAccount?: boolean;
     userPassword?: string;
     userRole?: import("../config/constants").UserRole;
+    registerAsRider?: boolean;
+    riderVehicle?: { make?: string; model?: string; plate?: string; whatsappPhone?: string };
     leaveBalance?: LeaveBalanceInput;
     [key: string]: unknown;
   };
@@ -244,7 +266,7 @@ export async function updateEmployee(req: Request, res: Response) {
       const existing = employee.documents.find((d) => d.type === newDoc.type);
       return {
         ...newDoc,
-        fileUrl: existing?.fileUrl ?? newDoc.fileUrl,
+        fileUrl: existing?.fileUrl ?? (newDoc as { fileUrl?: string }).fileUrl,
         uploadedAt: existing?.uploadedAt ?? newDoc.uploadedAt,
         uploadedBy: existing?.uploadedBy ?? newDoc.uploadedBy,
         _id: existing?._id,
@@ -304,8 +326,25 @@ export async function updateEmployee(req: Request, res: Response) {
   if (createUserAccount && userPassword && !employee.userId) {
     await createUserForEmployee(req.user!, employee, {
       password: userPassword,
-      role: userRole,
+      role: userRole ?? (registerAsRider ? "rider" : undefined),
     });
+  }
+
+  if (registerAsRider) {
+    const { Rider } = await import("../models/Rider.model");
+    const existingRider = await Rider.findOne({ employeeId: employee._id, deletedAt: null });
+    if (!existingRider) {
+      await createRiderForEmployee(employee, req.user!._id, {
+        vehicleMake: riderVehicle?.make,
+        vehicleModel: riderVehicle?.model,
+        vehiclePlate: riderVehicle?.plate,
+        whatsappPhone: riderVehicle?.whatsappPhone ?? employee.phone,
+      });
+    } else {
+      await syncRiderFromEmployee(employee);
+    }
+  } else {
+    await syncRiderFromEmployee(employee);
   }
 
   if (leaveBalance) {
@@ -439,7 +478,7 @@ export async function uploadFamilyBataka(req: Request, res: Response) {
   );
 
   if (!member.bataka) {
-    (member as Record<string, unknown>).bataka = { status: "valid", fileUrl };
+    (member as unknown as Record<string, unknown>).bataka = { status: "valid", fileUrl };
   } else {
     member.bataka.fileUrl = fileUrl;
     member.bataka.status = "valid";

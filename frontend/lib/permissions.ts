@@ -8,6 +8,7 @@ const ROLE_PERMISSIONS: Record<ApiUser["role"], string[]> = {
     "company:view", "company:edit", "branch:*", "employee:*", "attendance:*",
     "leave:*", "recruitment:*", "performance:*",
     "product:*", "supplier:*", "purchase:*", "inventory:*", "stock_transfer:*", "customer:*",
+    "rider:*", "delivery:*",
     "notification:*", "report:*", "user:*",
   ],
   branch_manager: [
@@ -18,6 +19,7 @@ const ROLE_PERMISSIONS: Record<ApiUser["role"], string[]> = {
     "product:view", "supplier:view", "purchase:view", "purchase:create", "purchase:approve",
     "inventory:view", "inventory:edit", "stock_transfer:view", "stock_transfer:create", "stock_transfer:approve",
     "customer:view", "customer:create",
+    "rider:view", "rider:edit", "delivery:view", "delivery:create", "delivery:assign", "delivery:edit",
     "notification:view", "report:view", "report:export",
   ],
   hr_manager: [
@@ -29,12 +31,19 @@ const ROLE_PERMISSIONS: Record<ApiUser["role"], string[]> = {
   inventory_manager: [
     "dashboard:view", "branch:view",
     "product:*", "supplier:view", "purchase:view", "purchase:create", "purchase:approve",
-    "inventory:*", "stock_transfer:*", "customer:*", "notification:view", "report:view", "report:export",
+    "inventory:*", "stock_transfer:*", "customer:*", "rider:view", "delivery:*",
+    "notification:view", "report:view", "report:export",
   ],
   procurement_manager: [
     "dashboard:view", "branch:view",
     "product:view", "supplier:*", "purchase:*",
-    "inventory:view", "stock_transfer:view", "customer:view", "customer:create", "notification:view", "report:view", "report:export",
+    "inventory:view", "stock_transfer:view", "customer:view", "customer:create",
+    "rider:view", "delivery:view", "delivery:create", "delivery:assign",
+    "notification:view", "report:view", "report:export",
+  ],
+  rider: [
+    "dashboard:view",
+    "delivery:view", "delivery:edit", "notification:view",
   ],
   employee: [
     "dashboard:view",
@@ -71,6 +80,10 @@ export function isHrOrAbove(user: ApiUser | null): boolean {
 export function isSupplyRole(user: ApiUser | null): boolean {
   if (!user) return false;
   return ["super_admin", "business_owner", "inventory_manager", "procurement_manager", "branch_manager"].includes(user.role);
+}
+
+export function isRiderRole(user: ApiUser | null): boolean {
+  return user?.role === "rider";
 }
 
 export function isEmployeeRole(user: ApiUser | null): boolean {

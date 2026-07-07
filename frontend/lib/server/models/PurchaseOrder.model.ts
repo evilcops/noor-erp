@@ -17,6 +17,10 @@ export interface IPurchaseOrderItem {
   quantityOrdered: number;
   quantityReceived: number;
   unitCost: number;
+  previousPurchaseCost?: number;
+  previousSellingPrice?: number;
+  newPurchaseCost?: number;
+  newSellingPrice?: number;
   notes?: string;
 }
 
@@ -69,6 +73,10 @@ const purchaseOrderSchema = new Schema<IPurchaseOrder>(
         quantityOrdered: { type: Number, required: true, min: 1 },
         quantityReceived: { type: Number, default: 0 },
         unitCost: { type: Number, required: true, min: 0 },
+        previousPurchaseCost: Number,
+        previousSellingPrice: Number,
+        newPurchaseCost: Number,
+        newSellingPrice: Number,
         notes: String,
       },
     ],

@@ -6,6 +6,9 @@ export interface ICustomer extends Document {
   name?: string;
   phone: string;
   email?: string;
+  address?: string;
+  area?: string;
+  coordinates?: { lat: number; lng: number };
   notes?: string;
   createdBy?: mongoose.Types.ObjectId;
   updatedBy?: mongoose.Types.ObjectId;
@@ -20,6 +23,9 @@ const customerSchema = new Schema<ICustomer>(
     name: String,
     phone: { type: String, required: true, trim: true },
     email: { type: String, lowercase: true, trim: true },
+    address: String,
+    area: String,
+    coordinates: { lat: Number, lng: Number },
     notes: String,
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
     updatedBy: { type: Schema.Types.ObjectId, ref: "User" },

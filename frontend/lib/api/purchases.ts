@@ -35,6 +35,12 @@ export const purchaseApi = {
   cancel: (id: string) =>
     apiRequest<PurchaseOrder>(`/purchases/${id}/cancel`, { method: "POST" }),
 
+  amend: (id: string, items: import("@/types/purchase").AmendPurchaseItemInput[]) =>
+    apiRequest<PurchaseOrder>(`/purchases/${id}/amend`, {
+      method: "POST",
+      body: JSON.stringify({ items }),
+    }),
+
   sendToSupplier: (id: string) =>
     apiRequest<{ message: string; sentTo: string }>(`/purchases/${id}/send-to-supplier`, { method: "POST" }),
 };

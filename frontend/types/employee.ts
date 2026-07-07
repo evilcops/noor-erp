@@ -149,7 +149,7 @@ export interface CreateEmployeeInput {
   complianceDocs?: ComplianceDocs;
   createUserAccount?: boolean;
   userPassword?: string;
-  userRole?: "super_admin" | "business_owner" | "branch_manager" | "hr_manager" | "employee";
+  userRole?: "super_admin" | "business_owner" | "branch_manager" | "hr_manager" | "inventory_manager" | "procurement_manager" | "rider" | "employee";
   leaveBalance: EmployeeLeaveBalanceInput;
 }
 
@@ -157,7 +157,7 @@ export type UpdateEmployeeInput = Partial<Omit<CreateEmployeeInput, "companyId" 
   leaveBalance?: EmployeeLeaveBalanceInput;
 };
 
-export type FamilyRelationship = "spouse" | "son" | "daughter" | "mother" | "father";
+export type FamilyRelationship = "spouse" | "son" | "daughter" | "mother" | "father" | "parents";
 
 export interface FamilyMemberDocument {
   issueDate?: string;

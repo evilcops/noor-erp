@@ -8,6 +8,7 @@ interface SearchBarProps {
   onChange: (value: string) => void;
   placeholder?: string;
   debounceMs?: number;
+  className?: string;
 }
 
 export function SearchBar({
@@ -15,6 +16,7 @@ export function SearchBar({
   onChange,
   placeholder = "Search...",
   debounceMs = 300,
+  className = "",
 }: SearchBarProps) {
   const [local, setLocal] = useState(value);
   const onChangeRef = useRef(onChange);
@@ -35,7 +37,7 @@ export function SearchBar({
   }, [local, debounceMs, value]);
 
   return (
-    <div className="relative">
+    <div className={`relative ${className}`.trim()}>
       <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
       <input
         type="search"

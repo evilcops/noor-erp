@@ -59,12 +59,13 @@ const EMPTY_FORM: UserFormState = {
 
 function getAssignableRoles(actorRole: UserRole): UserRole[] {
   const map: Record<UserRole, UserRole[]> = {
-    super_admin: ["super_admin", "business_owner", "branch_manager", "hr_manager", "inventory_manager", "procurement_manager", "employee"],
+    super_admin: ["super_admin", "business_owner", "branch_manager", "hr_manager", "inventory_manager", "procurement_manager", "rider", "employee"],
     business_owner: ["business_owner", "branch_manager", "hr_manager", "inventory_manager", "procurement_manager", "employee"],
     branch_manager: ["employee"],
     hr_manager: ["employee"],
     inventory_manager: ["employee"],
     procurement_manager: ["employee"],
+    rider: [],
     employee: [],
   };
   return map[actorRole] ?? [];

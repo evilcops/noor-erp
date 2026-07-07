@@ -1,5 +1,8 @@
 import type { Request, Response } from "express";
-import { Customer } from "../models/Customer.model";
+import mongoose from "mongoose";
+import { normalizePhone, phoneLookupVariants } from "@/lib/phone";
+import type { HydratedDocument } from "mongoose";
+import { Customer, type ICustomer } from "../models/Customer.model";
 import { Sale } from "../models/Sale.model";
 import { Product } from "../models/Product.model";
 import { StockLevel } from "../models/StockLevel.model";
@@ -21,6 +24,7 @@ import {
   updateStockLevel,
 } from "../services/inventory.service";
 import { notifyLowStock } from "../services/inventory-notification.service";
+import { createDeliveryFromSale } from "../services/delivery.service";
 
 async function generateSaleNumber(companyId: string) {
   const year = new Date().getFullYear();
@@ -32,30 +36,91 @@ async function generateSaleNumber(companyId: string) {
   return `${prefix}${String(count + 1).padStart(4, "0")}`;
 }
 
+async function findCustomerByPhone(companyId: string, phone: string) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return null;
+
+  let customer = await Customer.findOne({ companyId, deletedAt: null, phone: normalized });
+  if (customer) return customer;
+
+  const legacyVariants = phoneLookupVariants(phone).filter((v) => v !== normalized);
+  if (legacyVariants.length === 0) return null;
+
+  return Customer.findOne({
+    companyId,
+    deletedAt: null,
+    phone: { $in: legacyVariants },
+  });
+}
+
 async function findOrCreateCustomer(
   companyId: string,
-  data: { phone: string; email?: string; name?: string },
+  data: { phone: string; email?: string; name?: string; address?: string; area?: string },
   userId: string
-) {
-  const phone = data.phone.trim();
-  let customer = await Customer.findOne({ companyId, phone, deletedAt: null });
-
-  if (customer) {
-    if (data.email && !customer.email) customer.email = data.email.trim();
-    if (data.name && !customer.name) customer.name = data.name.trim();
-    customer.updatedBy = userId as typeof customer.updatedBy;
-    await customer.save();
-    return customer;
+): Promise<{ customer: HydratedDocument<ICustomer>; created: boolean }> {
+  const phone = normalizePhone(data.phone);
+  if (!phone) {
+    throw new AppError("BAD_REQUEST", "A valid customer phone number is required", 400);
   }
 
-  return Customer.create({
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+  let customer = await findCustomerByPhone(companyId, data.phone);
+
+  if (customer) {
+    if (data.email?.trim() && !customer.email) customer.email = data.email.trim();
+    if (data.name?.trim() && !customer.name) customer.name = data.name.trim();
+    if (data.address?.trim()) customer.address = data.address.trim();
+    if (data.area?.trim()) customer.area = data.area.trim();
+    if (customer.phone !== phone) customer.phone = phone;
+    customer.updatedBy = userObjectId;
+    await customer.save();
+    return { customer, created: false };
+  }
+
+  const created = await Customer.create({
     companyId,
     phone,
     email: data.email?.trim() || undefined,
     name: data.name?.trim() || undefined,
-    createdBy: userId,
-    updatedBy: userId,
+    address: data.address?.trim() || undefined,
+    area: data.area?.trim() || undefined,
+    createdBy: userObjectId,
+    updatedBy: userObjectId,
   });
+  return { customer: created, created: true };
+}
+
+export async function createCustomer(req: Request, res: Response) {
+  assertCompanyAccess(req.user!, req.body.companyId);
+
+  const phone = normalizePhone(req.body.phone);
+  if (!phone) {
+    throw new AppError("BAD_REQUEST", "A valid customer phone number is required", 400);
+  }
+
+  const existing = await findCustomerByPhone(req.body.companyId, req.body.phone);
+  if (existing) {
+    throw new AppError(
+      "CONFLICT",
+      `A customer with this phone already exists${existing.name ? `: ${existing.name}` : ""}. Use the existing customer or a different phone number.`,
+      409
+    );
+  }
+
+  const userObjectId = new mongoose.Types.ObjectId(String(req.user!._id));
+  const customer = await Customer.create({
+    companyId: req.body.companyId,
+    phone,
+    email: req.body.email?.trim() || undefined,
+    name: req.body.name?.trim() || undefined,
+    address: req.body.address?.trim() || undefined,
+    area: req.body.area?.trim() || undefined,
+    notes: req.body.notes?.trim() || undefined,
+    createdBy: userObjectId,
+    updatedBy: userObjectId,
+  });
+
+  return sendSuccess(res, customer.toObject(), 201);
 }
 
 export async function listCustomers(req: Request, res: Response) {
@@ -134,23 +199,30 @@ export async function recordSale(req: Request, res: Response) {
   const totalAmount = unitPrice * req.body.quantity;
 
   let customer;
-  if (req.body.customerId) {
+  const customerId = req.body.customerId;
+  const hasValidCustomerId = customerId && mongoose.isValidObjectId(customerId);
+
+  if (hasValidCustomerId) {
     customer = await Customer.findOne({
-      _id: req.body.customerId,
+      _id: customerId,
       companyId: req.body.companyId,
       deletedAt: null,
     });
     if (!customer) throw new AppError("NOT_FOUND", "Customer not found", 404);
   } else {
-    customer = await findOrCreateCustomer(
+    const result = await findOrCreateCustomer(
       req.body.companyId,
       {
         phone: req.body.customerPhone,
         email: req.body.customerEmail,
         name: req.body.customerName,
+        address: req.body.customerAddress,
+        area: req.body.customerArea,
       },
       String(req.user!._id)
     );
+    customer = result.customer;
+    (req as Request & { customerCreated?: boolean }).customerCreated = result.created;
   }
 
   const saleNumber = await generateSaleNumber(req.body.companyId);
@@ -195,11 +267,32 @@ export async function recordSale(req: Request, res: Response) {
 
   const populated = await Sale.findById(sale._id)
     .populate("productId", "name sku")
-    .populate("customerId", "name phone email")
+    .populate("customerId", "name phone email address area")
     .populate("branchId", "name")
     .lean();
 
-  return sendSuccess(res, populated, 201);
+  const delivery = await createDeliveryFromSale(sale, customer, String(req.user!._id), {
+    promisedWindowStart: req.body.promisedWindowStart
+      ? new Date(req.body.promisedWindowStart)
+      : undefined,
+    promisedWindowEnd: req.body.promisedWindowEnd
+      ? new Date(req.body.promisedWindowEnd)
+      : undefined,
+  });
+
+  const rider = delivery?.riderId;
+  const riderCode =
+    rider && typeof rider === "object" && "riderCode" in rider
+      ? (rider as { riderCode?: string }).riderCode
+      : undefined;
+
+  return sendSuccess(res, {
+    ...populated,
+    delivery,
+    riderAssigned: Boolean(delivery?.riderId),
+    riderCode,
+    customerCreated: (req as Request & { customerCreated?: boolean }).customerCreated ?? false,
+  }, 201);
 }
 
 export async function getSale(req: Request, res: Response) {

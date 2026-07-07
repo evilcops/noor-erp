@@ -11,7 +11,9 @@ import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
+import { BranchSubBranchSelect } from "@/components/common/BranchSubBranchSelect";
 import { Select } from "@/components/ui/Select";
+import { resolveMainAndSubBranchId } from "@/lib/branch-utils";
 import { useAuth, useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { stockTransferApi } from "@/lib/api/inventory";
@@ -149,20 +151,30 @@ export function StockTransfersPage() {
 
       <Modal open={formOpen} onOpenChange={setFormOpen} title="Request Stock Transfer" size="lg">
         <div className="grid gap-4 sm:grid-cols-2">
-          <div><Label>From Branch *</Label>
-            <Select
-              value={fromBranchId}
-              onChange={(e) => setFromBranchId(e.target.value)}
-              placeholder="Select"
-              options={branches.map((b) => ({ value: b._id, label: b.name }))}
+          <div className="sm:col-span-2">
+            <Label>From Branch *</Label>
+            <BranchSubBranchSelect
+              branches={branches}
+              mainBranchId={resolveMainAndSubBranchId(fromBranchId, branches).mainId}
+              subBranchId={resolveMainAndSubBranchId(fromBranchId, branches).subId}
+              onMainBranchChange={(id) => setFromBranchId(id)}
+              onSubBranchChange={(id) => {
+                const mainId = resolveMainAndSubBranchId(fromBranchId, branches).mainId;
+                setFromBranchId(id || mainId);
+              }}
             />
           </div>
-          <div><Label>To Branch *</Label>
-            <Select
-              value={toBranchId}
-              onChange={(e) => setToBranchId(e.target.value)}
-              placeholder="Select"
-              options={branches.map((b) => ({ value: b._id, label: b.name }))}
+          <div className="sm:col-span-2">
+            <Label>To Branch *</Label>
+            <BranchSubBranchSelect
+              branches={branches}
+              mainBranchId={resolveMainAndSubBranchId(toBranchId, branches).mainId}
+              subBranchId={resolveMainAndSubBranchId(toBranchId, branches).subId}
+              onMainBranchChange={(id) => setToBranchId(id)}
+              onSubBranchChange={(id) => {
+                const mainId = resolveMainAndSubBranchId(toBranchId, branches).mainId;
+                setToBranchId(id || mainId);
+              }}
             />
           </div>
         </div>

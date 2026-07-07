@@ -199,7 +199,12 @@ export async function getInventoryDashboard(req: Request, res: Response) {
       level.branchId && typeof level.branchId === "object" ? level.branchId._id : level.branchId
     );
     const branchName =
-      level.branchId && typeof level.branchId === "object" ? level.branchId.name ?? "Branch" : "Branch";
+      level.branchId &&
+      typeof level.branchId === "object" &&
+      "name" in level.branchId &&
+      typeof (level.branchId as { name?: string }).name === "string"
+        ? (level.branchId as { name: string }).name
+        : "Branch";
     const existing = branchMap.get(branchId) ?? {
       branchId,
       branchName,

@@ -7,6 +7,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   hr_manager: "HR Manager",
   inventory_manager: "Inventory Manager",
   procurement_manager: "Procurement Manager",
+  rider: "Rider",
   employee: "Employee",
 };
 
@@ -25,6 +26,8 @@ export const RESOURCE_LABELS: Record<Resource, string> = {
   inventory: "Inventory",
   stock_transfer: "Stock Transfers",
   customer: "Customers",
+  rider: "Riders",
+  delivery: "Deliveries",
   notification: "Notifications",
   report: "Reports",
   audit: "Audit Logs",
@@ -68,6 +71,8 @@ export const UI_RESOURCES: Resource[] = [
   "inventory",
   "stock_transfer",
   "customer",
+  "rider",
+  "delivery",
   "notification",
   "report",
   "user",

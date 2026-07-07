@@ -5,6 +5,7 @@ export type UserRole =
   | "hr_manager"
   | "inventory_manager"
   | "procurement_manager"
+  | "rider"
   | "employee";
 
 export type Resource =
@@ -22,6 +23,8 @@ export type Resource =
   | "inventory"
   | "stock_transfer"
   | "customer"
+  | "rider"
+  | "delivery"
   | "notification"
   | "report"
   | "audit"
