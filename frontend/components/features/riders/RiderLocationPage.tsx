@@ -143,7 +143,7 @@ export function RiderLocationPage() {
   });
 
   const list = data?.riders ?? [];
-  const withLocation = list.filter((r) => r.currentLocation?.lat != null);
+  const withLocation = list.filter((r) => r.isOnShift && r.currentLocation?.lat != null);
   const withRoute = list.filter((r) => (r.route?.stopCount ?? 0) > 0);
   const deliveryCount = data?.deliveryCount ?? 0;
   const totalRouteCost = data?.totalRouteCost ?? 0;
@@ -352,7 +352,10 @@ export function RiderLocationPage() {
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">{rider.riderCode}</p>
                   <p className="mt-1 text-xs">
-                    GPS: {locationAge(rider.currentLocation?.updatedAt)}
+                    GPS:{" "}
+                    {rider.isOnShift
+                      ? locationAge(rider.currentLocation?.updatedAt)
+                      : "Off shift"}
                     {rider.route ? (
                       <>
                         <br />

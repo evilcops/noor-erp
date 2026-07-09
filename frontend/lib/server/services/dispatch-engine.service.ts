@@ -9,7 +9,7 @@ import { computePriorityScore } from "./delivery-scheduling.service";
 import { pointInCluster } from "./cluster-grid.service";
 import { optimizeRoute } from "./route-optimization.service";
 import { deliveryInDateRangeQuery, scheduledDateInRangeQuery } from "../utils/deliveryDateFilter";
-import { branchIdFilter, expandMainBranchIds } from "../utils/branchScope";
+import { branchIdFilter, expandMainBranchIds, getBranchWarehousePoint } from "../utils/branchScope";
 
 /** Default warehouse prep time before dispatch (minutes) */
 export const DEFAULT_PREP_MINUTES = 15;
@@ -20,6 +20,10 @@ export const AVG_SPEED_MPS = 8;
 export const HIGH_VALUE_THRESHOLD = 40_000;
 /** Low-value orders are always grouped into the next cluster run */
 export const LOW_VALUE_THRESHOLD = 1_500;
+/** Riders within this radius of the warehouse are preferred for new assignments */
+export const WAREHOUSE_NEAR_RADIUS_KM = 3;
+export const WAREHOUSE_PROXIMITY_BONUS_MAX = 45;
+const RIDER_LOCATION_MAX_AGE_MS = 30 * 60 * 1000;
 
 type DeliveryLean = {
   _id: mongoose.Types.ObjectId;
@@ -64,6 +68,31 @@ function buildAlternativeWindows(baseStart: Date, count = 3): { start: Date; end
   return windows;
 }
 
+function warehouseProximityBonus(
+  rider: {
+    isOnShift?: boolean;
+    currentLocation?: { lat?: number; lng?: number; updatedAt?: Date };
+  },
+  warehouse: { lat: number; lng: number }
+): number {
+  if (!rider.isOnShift) return 0;
+  const loc = rider.currentLocation;
+  if (loc?.lat == null || loc?.lng == null) return 0;
+
+  if (loc.updatedAt) {
+    const age = Date.now() - new Date(loc.updatedAt).getTime();
+    if (age > RIDER_LOCATION_MAX_AGE_MS) return 0;
+  }
+
+  const distKm = haversineDistanceMeters(
+    { lat: loc.lat, lng: loc.lng },
+    warehouse
+  ) / 1000;
+  if (distKm > WAREHOUSE_NEAR_RADIUS_KM) return 0;
+
+  return WAREHOUSE_PROXIMITY_BONUS_MAX * (1 - distKm / WAREHOUSE_NEAR_RADIUS_KM);
+}
+
 async function pickBestRiderForCluster(input: {
   companyId: string;
   branchId: string;
@@ -72,6 +101,7 @@ async function pickBestRiderForCluster(input: {
   excludeRiderIds: Set<string>;
   warehouseReadyAt: Date;
 }) {
+  const warehouse = await getBranchWarehousePoint(input.branchId);
   const riders = await Rider.find({
     companyId: input.companyId,
     branchId: input.branchId,
@@ -108,6 +138,8 @@ async function pickBestRiderForCluster(input: {
     }
 
     if (isHighValue && load === 0) score += 25;
+
+    score += warehouseProximityBonus(rider, warehouse);
 
     if (score > bestScore) {
       bestScore = score;
@@ -256,7 +288,9 @@ export async function predictDeliveryPromise(input: {
     status: { $in: ["available", "active", "on_delivery", "returning_to_warehouse", "loading"] },
   }).lean();
 
+  const warehouse = await getBranchWarehousePoint(input.branchId);
   let bestRider: (typeof riders)[0] | null = null;
+  let bestScore = -Infinity;
   let earliestRiderAt = new Date(now.getTime() + 2 * 60 * 60000);
 
   for (const rider of riders) {
@@ -267,9 +301,13 @@ export async function predictDeliveryPromise(input: {
     const availableAt = await predictRiderReturnTime(rider);
     const riderReady = availableAt > warehouseReadyAt ? availableAt : warehouseReadyAt;
 
-    if (riderReady < earliestRiderAt) {
-      earliestRiderAt = riderReady;
+    const delayMin = Math.max(0, (riderReady.getTime() - warehouseReadyAt.getTime()) / 60000);
+    let score = 100 - delayMin * 2 - load * 4 + warehouseProximityBonus(rider, warehouse);
+
+    if (score > bestScore) {
+      bestScore = score;
       bestRider = rider;
+      earliestRiderAt = riderReady;
     }
   }
 

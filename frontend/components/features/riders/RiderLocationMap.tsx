@@ -113,7 +113,7 @@ export function RiderLocationMap({
                 </CircleMarker>
               ))}
 
-              {loc?.lat != null && loc?.lng != null ? (
+              {rider.isOnShift && loc?.lat != null && loc?.lng != null ? (
                 <Marker
                   position={[loc.lat, loc.lng]}
                   icon={riderIcon(color, rider.riderCode)}

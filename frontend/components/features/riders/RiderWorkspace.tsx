@@ -153,7 +153,7 @@ export function RiderWorkspace() {
   }, [notesOpen]);
 
   useEffect(() => {
-    if (!rider?.isOnJourney || !rider._id) {
+    if (!rider?.isOnShift || !rider._id) {
       if (locationInterval.current) clearInterval(locationInterval.current);
       return;
     }
@@ -174,7 +174,7 @@ export function RiderWorkspace() {
     return () => {
       if (locationInterval.current) clearInterval(locationInterval.current);
     };
-  }, [rider?.isOnJourney, rider?._id]);
+  }, [rider?.isOnShift, rider?._id]);
 
   if (isLoading) {
     return <p className="p-6 text-muted-foreground">Loading your deliveries…</p>;
@@ -195,7 +195,7 @@ export function RiderWorkspace() {
     <div className="mx-auto max-w-2xl space-y-6">
       <PageHeader
         title="My Deliveries"
-        description="The dispatch engine assigns your route — start shift, then start route when loaded"
+        description="Start shift to share your location — dispatch assigns nearby riders first. Start route when loaded."
       />
 
       <div className="flex flex-wrap gap-2">

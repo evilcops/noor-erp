@@ -207,7 +207,7 @@ export async function listRiderLocationsWithRoutes(req: Request, res: Response) 
 
   const riders = await Rider.find(filter)
     .populate("employeeId", "firstName lastName phone")
-    .select("riderCode status isOnJourney currentLocation employeeId branchId")
+    .select("riderCode status isOnShift isOnJourney currentLocation employeeId branchId")
     .lean();
 
   const branchIds = [...new Set(riders.map((r) => String(r.branchId)))];
@@ -291,6 +291,7 @@ export async function listRiderLocationsWithRoutes(req: Request, res: Response) 
 
       return {
         ...rider,
+        currentLocation: rider.isOnShift ? rider.currentLocation : undefined,
         activeDelivery,
         remainingStops,
         route,

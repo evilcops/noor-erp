@@ -442,6 +442,7 @@ export async function endShift(req: Request, res: Response) {
   rider.isOnJourney = false;
   rider.status = "offline";
   rider.shiftStartedAt = undefined;
+  rider.set("currentLocation", undefined);
   await rider.save();
 
   await RiderJourney.updateMany(
