@@ -1,3 +1,4 @@
+import type { Types } from "mongoose";
 import { planRoadRouteRoundTrip } from "./route-optimization.service";
 
 export interface RiderRoutePlan {
@@ -17,7 +18,7 @@ type DeliveryLike = {
   _id: unknown;
   coordinates?: { lat?: number; lng?: number };
   routeOrder?: number;
-  customerId?: { name?: string; phone?: string } | string;
+  customerId?: { name?: string; phone?: string } | string | Types.ObjectId;
 };
 
 export async function buildRiderRoutePlan(
@@ -45,7 +46,10 @@ export async function buildRiderRoutePlan(
       const del = ordered.find((d) => String(d._id) === s.id);
       const customer = del?.customerId;
       const label =
-        typeof customer === "object" && customer
+        customer &&
+        typeof customer === "object" &&
+        "name" in customer &&
+        (customer.name ?? customer.phone)
           ? customer.name ?? customer.phone ?? `Stop ${i + 1}`
           : `Stop ${i + 1}`;
       return {
