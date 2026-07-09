@@ -4,9 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build && tsx scripts/prepare-standalone.ts",
+    "build": "next build",
     "start": "next start",
-    "start:standalone": "node .next/standalone/server.js",
     "lint": "eslint",
     "seed": "tsx --env-file=.env lib/server/scripts/seed.ts",
     "reset-admin": "tsx --env-file=.env lib/server/scripts/reset-admin.ts",
