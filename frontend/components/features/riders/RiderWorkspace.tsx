@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -19,19 +20,22 @@ import { Label } from "@/components/ui/Label";
 import { Modal } from "@/components/ui/Modal";
 import { deliveryApi } from "@/lib/api/deliveries";
 import { riderApi } from "@/lib/api/riders";
+import { googleMapsRoundTripUrl } from "@/lib/navigation";
 import type { Delivery } from "@/types/delivery";
+import type { RiderRoutePlan } from "@/types/rider";
+
+const RiderRouteMap = dynamic(
+  () => import("@/components/features/riders/RiderRouteMap").then((m) => m.RiderRouteMap),
+  { ssr: false, loading: () => <div className="h-[280px] animate-pulse rounded-lg bg-muted" /> }
+);
 
 function refName(ref: string | { name?: string; phone?: string; address?: string } | undefined) {
   if (!ref || typeof ref === "string") return ref ?? "—";
   return ref.name ?? ref.phone ?? "—";
 }
 
-function navUrl(d: Delivery) {
-  const c = d.coordinates;
-  if (c?.lat) return `https://www.openstreetmap.org/directions?to=${c.lat},${c.lng}`;
-  const customer = typeof d.customerId === "object" ? d.customerId.address : "";
-  if (customer) return `https://www.openstreetmap.org/search?query=${encodeURIComponent(customer)}`;
-  return null;
+function fullRouteNavUrl(route: RiderRoutePlan) {
+  return googleMapsRoundTripUrl(route.warehouse, route.stops);
 }
 
 function deliveryOrderAmount(d: Delivery | null): string {
@@ -139,7 +143,8 @@ export function RiderWorkspace() {
 
   const rider = data?.rider;
   const deliveries = data?.deliveries ?? [];
-  const nextStop = deliveries.find((d) => d.status === "scheduled" || d.status === "in_transit");
+  const route = data?.route ?? null;
+  const routeNavUrl = route ? fullRouteNavUrl(route) : null;
 
   useEffect(() => {
     if (notesOpen) {
@@ -219,28 +224,31 @@ export function RiderWorkspace() {
         )}
       </div>
 
-      {nextStop ? (
-        <div className="rounded-lg border-2 border-brand bg-brand/5 p-4">
-          <p className="text-xs font-medium uppercase text-brand">Next stop</p>
-          <p className="text-lg font-semibold">{refName(nextStop.customerId)}</p>
-          <p className="text-sm text-muted-foreground">
-            {nextStop.deliveryAddress ?? nextStop.area ?? "No address"}
-          </p>
-          {navUrl(nextStop) ? (
-            <a
-              href={navUrl(nextStop)!}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-3 flex w-full items-center justify-center rounded-lg bg-brand px-4 py-2.5 text-sm font-medium text-brand-foreground"
-            >
-              <Navigation className="mr-2 h-4 w-4" />
-              Navigate
-            </a>
-          ) : null}
+      {route ? (
+        <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="font-semibold">Your route</p>
+              <p className="text-xs text-muted-foreground">
+                {route.stopCount} stops · {route.roundTripDistanceKm.toFixed(1)} km round trip · ~
+                {route.totalDurationMin} min
+              </p>
+            </div>
+            {routeNavUrl ? (
+              <a
+                href={routeNavUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground"
+              >
+                <Navigation className="mr-2 h-4 w-4" />
+                Navigate full route
+              </a>
+            ) : null}
+          </div>
+          <RiderRouteMap route={route} />
         </div>
-      ) : (
-        <p className="text-sm text-muted-foreground">No active stops — waiting for dispatch assignments.</p>
-      )}
+      ) : null}
 
       <div className="space-y-3">
         {deliveries.length === 0 ? (

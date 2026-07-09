@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { MAIN_NAV, SETTINGS_NAV, SUPPLY_NAV, RIDERS_NAV, isNavActive } from "@/config/site";
+import { MAIN_NAV, SETTINGS_NAV, SUPPLY_NAV, RIDERS_NAV, getActiveNavHref } from "@/config/site";
 import type { NavItem } from "@/config/site";
 import { MODULE_SIDEBAR_LABELS } from "@/config/modules";
 import { useErpModule } from "@/components/providers/ModuleProvider";
@@ -48,6 +48,8 @@ function NavSection({
 }) {
   if (items.length === 0) return null;
 
+  const activeHref = getActiveNavHref(pathname, items.map((item) => item.href));
+
   return (
     <div>
       {!collapsed ? (
@@ -57,7 +59,7 @@ function NavSection({
       ) : null}
       <ul className="space-y-1">
         {items.map((item) => {
-          const active = isNavActive(pathname, item.href);
+          const active = item.href === activeHref;
           const Icon = item.icon;
           return (
             <li key={item.href}>

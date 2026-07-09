@@ -1,5 +1,5 @@
 import { apiRequest, apiRequestWithMeta } from "./client";
-import type { Rider, RiderDetail, LiveRider } from "@/types/rider";
+import type { Rider, RiderDetail, LiveRider, RiderLocationSnapshot, RiderLocationsResult } from "@/types/rider";
 
 export const riderApi = {
   list: (params?: { page?: number; limit?: number; search?: string; status?: string; branchId?: string }) => {
@@ -21,6 +21,15 @@ export const riderApi = {
   live: (branchId?: string) => {
     const q = branchId ? `?branchId=${branchId}` : "";
     return apiRequest<LiveRider[]>(`/riders/live${q}`);
+  },
+
+  locations: (branchId?: string, params?: { dateFrom?: string; dateTo?: string }) => {
+    const q = new URLSearchParams();
+    if (branchId) q.set("branchId", branchId);
+    if (params?.dateFrom) q.set("dateFrom", params.dateFrom);
+    if (params?.dateTo) q.set("dateTo", params.dateTo);
+    const qs = q.toString();
+    return apiRequest<RiderLocationsResult>(`/riders/locations${qs ? `?${qs}` : ""}`);
   },
 
   updateLocation: (id: string, lat: number, lng: number) =>

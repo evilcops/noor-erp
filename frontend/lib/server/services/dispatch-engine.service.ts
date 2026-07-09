@@ -8,6 +8,8 @@ import { haversineDistanceMeters } from "./geocoding.service";
 import { computePriorityScore } from "./delivery-scheduling.service";
 import { pointInCluster } from "./cluster-grid.service";
 import { optimizeRoute } from "./route-optimization.service";
+import { deliveryInDateRangeQuery, scheduledDateInRangeQuery } from "../utils/deliveryDateFilter";
+import { branchIdFilter, expandMainBranchIds } from "../utils/branchScope";
 
 /** Default warehouse prep time before dispatch (minutes) */
 export const DEFAULT_PREP_MINUTES = 15;
@@ -768,13 +770,31 @@ export async function handleCustomerUnavailable(deliveryId: string) {
 }
 
 /** Fleet snapshot for dispatch dashboard */
-export async function getFleetDispatchSnapshot(companyId: string, branchId: string) {
-  const queue = await getDemandQueue(companyId, branchId);
+export async function getFleetDispatchSnapshot(
+  companyId: string,
+  branchId: string,
+  dateRange: { start: Date; end: Date }
+) {
+  const branchIds = await expandMainBranchIds(branchId);
+  const branchFilter = branchIdFilter(branchId, branchIds);
+  const dateFilter = deliveryInDateRangeQuery(dateRange.start, dateRange.end);
+  const runDateFilter = scheduledDateInRangeQuery(dateRange.start, dateRange.end);
+
+  const deliveries = await Delivery.find({
+    companyId,
+    branchId: branchFilter,
+    deletedAt: null,
+    status: { $nin: ["cancelled"] },
+    ...dateFilter,
+  })
+    .populate("saleId", "totalAmount")
+    .populate("clusterId", "code name")
+    .lean();
 
   const bySource: Record<string, number> = {};
   const clusterMap = new Map<string, { clusterId: string; code: string; count: number; totalValue: number }>();
 
-  for (const d of queue) {
+  for (const d of deliveries) {
     const src = d.orderSource ?? "new_order";
     bySource[src] = (bySource[src] ?? 0) + 1;
 
@@ -792,17 +812,26 @@ export async function getFleetDispatchSnapshot(companyId: string, branchId: stri
 
   const riders = await Rider.find({
     companyId,
-    branchId,
+    branchId: branchFilter,
     deletedAt: null,
     status: { $nin: ["inactive", "off_duty"] },
   }).lean();
 
+  const activeRiderIds = new Set(
+    deliveries
+      .filter((d) => d.riderId)
+      .map((d) => String(d.riderId))
+  );
+
   const riderSnapshots = await Promise.all(
-    riders.map(async (r) => {
+    riders
+      .filter((r) => activeRiderIds.has(String(r._id)))
+      .map(async (r) => {
       const stops = await Delivery.countDocuments({
         riderId: r._id,
         deletedAt: null,
         status: { $in: ["scheduled", "in_transit"] },
+        ...dateFilter,
       });
       return {
         riderId: String(r._id),
@@ -816,14 +845,16 @@ export async function getFleetDispatchSnapshot(companyId: string, branchId: stri
 
   const activeRuns = await DeliveryRun.find({
     companyId,
-    branchId,
-    status: { $in: ["planning", "loading", "active"] },
+    branchId: branchFilter,
+    status: { $nin: ["cancelled"] },
+    ...runDateFilter,
   })
     .populate("riderId", "riderCode")
     .lean();
 
   return {
-    demandQueueTotal: queue.length,
+    totalDeliveries: deliveries.length,
+    activeRiders: activeRiderIds.size,
     bySource,
     byCluster: [...clusterMap.values()],
     riders: riderSnapshots,

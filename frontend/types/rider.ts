@@ -51,3 +51,50 @@ export interface LiveRider extends Rider {
   activeDelivery?: import("./delivery").Delivery | null;
   remainingStops?: number;
 }
+
+export interface RiderRoutePoint {
+  lat: number;
+  lng: number;
+  order: number;
+  deliveryId?: string;
+  label?: string;
+}
+
+export interface RiderLocationSnapshot extends LiveRider {
+  route?: {
+    points: RiderRoutePoint[];
+    /** Road-following geometry from OSRM (not straight lines) */
+    pathGeometry: { lat: number; lng: number }[];
+    outboundDistanceKm: number;
+    returnDistanceKm: number;
+    roundTripDistanceKm: number;
+    totalDurationMin: number;
+    /** Round trip cost at costPerKm × roundTripDistanceKm */
+    roundTripCost: number;
+    costPerKm: number;
+    stopCount: number;
+  } | null;
+  warehouse?: { lat: number; lng: number };
+}
+
+export interface RiderLocationsResult {
+  dateFrom: string;
+  dateTo: string;
+  deliveryCount: number;
+  totalRouteCost: number;
+  totalRoundTripKm: number;
+  riders: RiderLocationSnapshot[];
+}
+
+export interface RiderRoutePlan {
+  warehouse: { lat: number; lng: number; label?: string };
+  pathGeometry: { lat: number; lng: number }[];
+  stops: { deliveryId: string; order: number; lat: number; lng: number; label: string }[];
+  outboundDistanceKm: number;
+  returnDistanceKm: number;
+  roundTripDistanceKm: number;
+  totalDurationMin: number;
+  roundTripCost: number;
+  costPerKm: number;
+  stopCount: number;
+}

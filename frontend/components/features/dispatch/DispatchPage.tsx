@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MapPin, Package, RefreshCw, Truck } from "lucide-react";
+import { MapPin, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatusBadge } from "@/components/common/StatusBadge";
@@ -18,8 +18,7 @@ import { deliveryApi } from "@/lib/api/deliveries";
 import { clusterApi } from "@/lib/api/clusters";
 import { clusterZoneSummary } from "@/components/features/clusters/ClusterZonesLayer";
 import { riderApi } from "@/lib/api/riders";
-import { printDeliveryNote } from "@/lib/pdf/delivery-note";
-import type { Delivery, WarehouseStatus } from "@/types/delivery";
+import type { Delivery } from "@/types/delivery";
 
 const DeliveryMap = dynamic(
   () => import("./DeliveryMap").then((m) => m.DeliveryMap),
@@ -32,50 +31,21 @@ function refName(ref: string | { name?: string; phone?: string } | undefined) {
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function formatPromiseWindow(start?: string, end?: string) {
-  if (!start || !end) return "—";
-  const s = new Date(start);
-  const e = new Date(end);
-  return `${s.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} – ${e.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-}
-
-const WAREHOUSE_NEXT: Partial<Record<WarehouseStatus, WarehouseStatus>> = {
-  order_confirmed: "picking",
-  picking: "packing",
-  packing: "ready_for_dispatch",
-  ready_for_dispatch: "waiting_for_rider",
-  waiting_for_rider: "loaded",
-  loaded: "dispatched",
-};
-
-const WAREHOUSE_LABELS: Record<string, string> = {
-  order_confirmed: "Start Picking",
-  picking: "Start Packing",
-  packing: "Ready for Dispatch",
-  ready_for_dispatch: "Waiting for Rider",
-  waiting_for_rider: "Mark Loaded",
-  loaded: "Dispatch",
-};
-
-const ORDER_SOURCE_LABELS: Record<string, string> = {
-  new_order: "New",
-  previous_day: "Previous Day",
-  standing_daily: "Daily Standing",
-  standing_weekly: "Weekly",
-  standing_fortnightly: "Fortnightly",
-  scheduled: "Scheduled",
-  replenishment: "Replenishment",
-  back_order: "Back Order",
-};
-
-function clusterLabel(d: Delivery) {
-  const c = d.clusterId;
-  if (!c) return "—";
-  if (typeof c === "object" && c && "code" in c) return (c as { code?: string }).code ?? "—";
-  return String(c);
+function formatDateRange(from: string, to: string) {
+  const fmt = (iso: string) => {
+    const [y, m, day] = iso.split("-").map(Number);
+    return new Date(y, m - 1, day).toLocaleDateString(undefined, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  };
+  if (from === to) return fmt(from);
+  return `${fmt(from)} – ${fmt(to)}`;
 }
 
 export function DispatchPage() {
@@ -91,6 +61,8 @@ export function DispatchPage() {
   const [slotEnd, setSlotEnd] = useState("10:00");
   const [priority, setPriority] = useState("normal");
   const [mapMainBranchId, setMapMainBranchId] = useState("");
+  const [dateFrom, setDateFrom] = useState(todayIso);
+  const [dateTo, setDateTo] = useState(todayIso);
 
   useEffect(() => {
     if (mapMainBranchId) return;
@@ -125,9 +97,9 @@ export function DispatchPage() {
   }, [selectedMainBranch]);
 
   const { data: dashboard } = useQuery({
-    queryKey: ["dispatch-dashboard"],
-    queryFn: () => deliveryApi.dashboard(),
-    enabled: !!user,
+    queryKey: ["dispatch-dashboard", branchId, dateFrom, dateTo],
+    queryFn: () => deliveryApi.dashboard({ branchId, dateFrom, dateTo }),
+    enabled: !!user && !!branchId && dateFrom <= dateTo,
     refetchInterval: 30000,
   });
 
@@ -144,17 +116,17 @@ export function DispatchPage() {
     enabled: !!user && assignOpen,
   });
 
-  const { data: demandQueue } = useQuery({
-    queryKey: ["dispatch-queue", branchId],
-    queryFn: () => deliveryApi.demandQueue(branchId),
-    enabled: !!user && !!branchId,
+  const { data: fleetSnapshot } = useQuery({
+    queryKey: ["dispatch-snapshot", branchId, dateFrom, dateTo],
+    queryFn: () => deliveryApi.fleetSnapshot(branchId, { dateFrom, dateTo }),
+    enabled: !!user && !!branchId && dateFrom <= dateTo,
     refetchInterval: 30000,
   });
 
-  const { data: fleetSnapshot } = useQuery({
-    queryKey: ["dispatch-snapshot", branchId],
-    queryFn: () => deliveryApi.fleetSnapshot(branchId),
-    enabled: !!user && !!branchId,
+  const { data: branchDeliveries } = useQuery({
+    queryKey: ["dispatch-deliveries", branchId, dateFrom, dateTo],
+    queryFn: () => deliveryApi.list({ branchId, dateFrom, dateTo, limit: 200 }),
+    enabled: !!user && !!branchId && dateFrom <= dateTo,
     refetchInterval: 30000,
   });
 
@@ -162,8 +134,9 @@ export function DispatchPage() {
     mutationFn: () => deliveryApi.processStandingOrders(branchId),
     onSuccess: (res) => {
       toast.success(`Processed ${res.processed} standing order(s)`);
-      void qc.invalidateQueries({ queryKey: ["dispatch-queue"] });
       void qc.invalidateQueries({ queryKey: ["dispatch-snapshot"] });
+      void qc.invalidateQueries({ queryKey: ["dispatch-dashboard"] });
+      void qc.invalidateQueries({ queryKey: ["dispatch-deliveries"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -174,19 +147,9 @@ export function DispatchPage() {
       const count = res.optimised?.length ?? 0;
       toast.success(`Fleet optimised — ${count} run(s) updated`);
       void qc.invalidateQueries({ queryKey: ["dispatch-dashboard"] });
-      void qc.invalidateQueries({ queryKey: ["dispatch-queue"] });
+      void qc.invalidateQueries({ queryKey: ["dispatch-snapshot"] });
       void qc.invalidateQueries({ queryKey: ["deliveries"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const warehouseMut = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      deliveryApi.warehouseStatus(id, status),
-    onSuccess: () => {
-      toast.success("Warehouse status updated");
-      void qc.invalidateQueries({ queryKey: ["dispatch-queue"] });
-      void qc.invalidateQueries({ queryKey: ["dispatch-dashboard"] });
+      void qc.invalidateQueries({ queryKey: ["dispatch-deliveries"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -247,18 +210,19 @@ export function DispatchPage() {
 
   const stats = dashboard?.stats;
   const pending = dashboard?.recentPending ?? [];
-  const queue = demandQueue ?? [];
+  const totalDeliveries = fleetSnapshot?.totalDeliveries ?? (stats ? stats.pending + stats.scheduled + stats.inTransit + stats.delivered : 0);
+  const activeRiders = stats?.activeRiders ?? fleetSnapshot?.activeRiders ?? 0;
 
   const mapDeliveries = useMemo(
-    () => [...pending, ...queue].filter((d) => d.coordinates?.lat),
-    [pending, queue]
+    () => (branchDeliveries?.data ?? []).filter((d) => d.coordinates?.lat),
+    [branchDeliveries?.data]
   );
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Dispatch"
-        description="Warehouse demand queue, delivery promises, and fleet optimisation"
+        description="Delivery promises, fleet optimisation, and live map"
         actions={
           can("delivery:assign") && branchId ? (
             <div className="flex flex-wrap gap-2">
@@ -282,87 +246,110 @@ export function DispatchPage() {
         }
       />
 
+      <div className="flex flex-wrap items-end gap-4 rounded-lg border border-border bg-card p-4">
+        <div className="min-w-[220px]">
+          <Label>Main branch</Label>
+          <Select
+            value={mapMainBranchId}
+            onChange={(e) => setMapMainBranchId(e.target.value)}
+            options={mainBranches.map((b) => ({ value: b._id, label: b.name }))}
+            placeholder="Select main branch"
+          />
+        </div>
+        <div>
+          <Label>Date from</Label>
+          <Input
+            type="date"
+            value={dateFrom}
+            max={dateTo}
+            onChange={(e) => {
+              const next = e.target.value;
+              setDateFrom(next);
+              if (next > dateTo) setDateTo(next);
+            }}
+            className="w-[150px]"
+          />
+        </div>
+        <div>
+          <Label>Date to</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              type="date"
+              value={dateTo}
+              min={dateFrom}
+              onChange={(e) => {
+                const next = e.target.value;
+                setDateTo(next);
+                if (next < dateFrom) setDateFrom(next);
+              }}
+              className="w-[150px]"
+            />
+            {dateFrom !== todayIso() || dateTo !== todayIso() ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  const today = todayIso();
+                  setDateFrom(today);
+                  setDateTo(today);
+                }}
+              >
+                Today
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        <p className="pb-2 text-xs text-muted-foreground">
+          {formatDateRange(dateFrom, dateTo)}
+          {branchClusters?.data?.length
+            ? ` · ${clusterZoneSummary(branchClusters.data)}`
+            : mapMainBranchId
+              ? " · No clusters for this branch"
+              : ""}
+        </p>
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         {[
-          { label: "Queue Total", value: fleetSnapshot?.demandQueueTotal ?? queue.length, color: "text-foreground" },
+          { label: "Deliveries", value: totalDeliveries, color: "text-foreground" },
           { label: "Pending", value: stats?.pending ?? 0, color: "text-amber-600" },
           { label: "Scheduled", value: stats?.scheduled ?? 0, color: "text-blue-600" },
           { label: "In Transit", value: stats?.inTransit ?? 0, color: "text-indigo-600" },
-          { label: "Active Riders", value: stats?.activeRiders ?? 0, color: "text-foreground" },
+          { label: "Active Riders", value: activeRiders, color: "text-foreground" },
         ].map((s) => (
           <div key={s.label} className="rounded-lg border border-border bg-card p-4">
             <p className="text-xs text-muted-foreground">{s.label}</p>
             <p className={`text-2xl font-semibold ${s.color}`}>{s.value}</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">{formatDateRange(dateFrom, dateTo)}</p>
           </div>
         ))}
       </div>
 
       {fleetSnapshot ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-lg border border-border bg-card p-4">
-            <h3 className="mb-3 font-semibold">Demand by Cluster</h3>
-            <div className="space-y-2">
-              {(fleetSnapshot.byCluster ?? []).length === 0 ? (
-                <p className="text-sm text-muted-foreground">No cluster demand</p>
-              ) : (
-                fleetSnapshot.byCluster.map((c) => (
-                  <div key={c.clusterId} className="flex justify-between rounded-md border border-border px-3 py-2 text-sm">
-                    <span className="font-medium">Cluster {c.code}</span>
-                    <span className="text-muted-foreground">
-                      {c.count} orders · {c.totalValue.toFixed(0)} value
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-          <div className="rounded-lg border border-border bg-card p-4">
-            <h3 className="mb-3 font-semibold">Active Delivery Runs</h3>
-            <div className="space-y-2">
-              {(fleetSnapshot.activeRuns ?? []).length === 0 ? (
-                <p className="text-sm text-muted-foreground">No active runs — click Optimise Fleet</p>
-              ) : (
-                fleetSnapshot.activeRuns.map((run) => (
-                  <div key={run.runId} className="rounded-md border border-border px-3 py-2 text-sm">
-                    <p className="font-medium">
-                      {run.riderCode} · {run.runNumber}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {run.stops} stops
-                      {run.deliveriesPerKm ? ` · ${run.deliveriesPerKm.toFixed(1)} del/km` : ""}
-                    </p>
-                  </div>
-                ))
-              )}
-            </div>
+        <div className="rounded-lg border border-border bg-card p-4">
+          <h3 className="mb-1 font-semibold">Demand by Cluster</h3>
+          <p className="mb-3 text-xs text-muted-foreground">{formatDateRange(dateFrom, dateTo)}</p>
+          <div className="space-y-2">
+            {(fleetSnapshot.byCluster ?? []).length === 0 ? (
+              <p className="text-sm text-muted-foreground">No cluster demand</p>
+            ) : (
+              fleetSnapshot.byCluster.map((c) => (
+                <div key={c.clusterId} className="flex justify-between rounded-md border border-border px-3 py-2 text-sm">
+                  <span className="font-medium">Cluster {c.code}</span>
+                  <span className="text-muted-foreground">
+                    {c.count} orders · {c.totalValue.toFixed(0)} value
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         </div>
       ) : null}
 
       <div className="space-y-3">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div className="min-w-[220px]">
-            <Label>Main branch</Label>
-            <Select
-              value={mapMainBranchId}
-              onChange={(e) => setMapMainBranchId(e.target.value)}
-              options={mainBranches.map((b) => ({ value: b._id, label: b.name }))}
-              placeholder="Select main branch"
-            />
-          </div>
-          {branchClusters?.data?.length ? (
-            <p className="text-xs text-muted-foreground pb-2">
-              {clusterZoneSummary(branchClusters.data)}
-            </p>
-          ) : mapMainBranchId ? (
-            <p className="text-xs text-amber-600 pb-2">
-              No clusters for this branch — create a main branch with a map location to auto-generate zones
-            </p>
-          ) : null}
-        </div>
-
         <DeliveryMap
-          focusKey={mapMainBranchId}
+          focusKey={`${mapMainBranchId}-${dateFrom}-${dateTo}`}
           center={warehousePoint}
           warehouse={warehousePoint}
           clusters={branchClusters?.data ?? []}
@@ -373,60 +360,10 @@ export function DispatchPage() {
 
       <div className="rounded-lg border border-border bg-card">
         <div className="border-b border-border px-4 py-3">
-          <h2 className="font-semibold flex items-center gap-2">
-            <Truck className="h-4 w-4" />
-            Warehouse Demand Queue
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            All due orders share one queue — advance through picking, packing, and dispatch
-          </p>
-        </div>
-        <div className="divide-y divide-border">
-          {queue.length === 0 ? (
-            <p className="p-6 text-sm text-muted-foreground">No orders in warehouse queue</p>
-          ) : (
-            queue.map((d) => {
-              const ws = d.warehouseStatus ?? "order_confirmed";
-              const nextStatus = WAREHOUSE_NEXT[ws];
-              return (
-                <div key={d._id} className="flex flex-wrap items-center justify-between gap-3 p-4">
-                  <div>
-                    <p className="font-medium">{d.deliveryNumber}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {refName(d.customerId)} ·{" "}
-                      {typeof d.saleId === "object" ? d.saleId.saleNumber : "—"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {ORDER_SOURCE_LABELS[d.orderSource ?? "new_order"] ?? d.orderSource} · Cluster {clusterLabel(d)}
-                      {" · "}
-                      Promise: {formatPromiseWindow(d.promisedWindowStart, d.promisedWindowEnd)}
-                      {d.queuePosition ? ` · Queue #${d.queuePosition}` : ""}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <StatusBadge status={ws} />
-                    {nextStatus && can("delivery:assign") ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={warehouseMut.isPending}
-                        onClick={() => warehouseMut.mutate({ id: d._id, status: nextStatus })}
-                      >
-                        {WAREHOUSE_LABELS[ws] ?? "Advance"}
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-border bg-card">
-        <div className="border-b border-border px-4 py-3">
           <h2 className="font-semibold">Pending Assignments</h2>
-          <p className="text-xs text-muted-foreground">Sorted by priority score</p>
+          <p className="text-xs text-muted-foreground">
+            Sorted by priority score · {formatDateRange(dateFrom, dateTo)}
+          </p>
         </div>
         <div className="divide-y divide-border">
           {pending.length === 0 ? (

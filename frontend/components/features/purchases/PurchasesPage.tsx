@@ -389,10 +389,9 @@ export function PurchasesPage() {
               mainBranchId={resolveMainAndSubBranchId(branchId, branches).mainId}
               subBranchId={resolveMainAndSubBranchId(branchId, branches).subId}
               onMainBranchChange={(id) => setBranchId(id)}
-              onSubBranchChange={(id) => {
-                const mainId = resolveMainAndSubBranchId(branchId, branches).mainId;
-                setBranchId(id || mainId);
-              }}
+              onSubBranchChange={(id) =>
+                setBranchId((prev) => id || resolveMainAndSubBranchId(prev, branches).mainId)
+              }
             />
           </div>
           <div><Label>Supplier *</Label>

@@ -2,6 +2,8 @@ import type { Request, Response } from "express";
 import { Rider } from "../models/Rider.model";
 import { Delivery } from "../models/Delivery.model";
 import { Employee } from "../models/Employee.model";
+import { Branch } from "../models/Branch.model";
+import { planRoadRouteRoundTrip } from "../services/route-optimization.service";
 import { buildTenantFilter } from "../services/permission.service";
 import {
   buildMeta,
@@ -10,13 +12,19 @@ import {
   sendSuccess,
 } from "../utils/apiResponse";
 import { AppError } from "../utils/AppError";
+import { deliveryInDateRangeQuery, formatLocalDate, parseDeliveryDateRange } from "../utils/deliveryDateFilter";
+import { branchIdFilter, expandMainBranchIds } from "../utils/branchScope";
 
 export async function listRiders(req: Request, res: Response) {
   const { page, limit, sortBy, sortOrder, skip } = parsePagination(req.query);
   const filter: Record<string, unknown> = { ...buildTenantFilter(req.user!), deletedAt: null };
 
   if (req.query.status) filter.status = req.query.status;
-  if (req.query.branchId) filter.branchId = req.query.branchId;
+  if (req.query.branchId) {
+    const mainId = String(req.query.branchId);
+    const branchIds = await expandMainBranchIds(mainId);
+    filter.branchId = branchIdFilter(mainId, branchIds);
+  }
   if (req.query.search) {
     filter.$or = [
       { riderCode: new RegExp(String(req.query.search), "i") },
@@ -146,7 +154,11 @@ export async function getRiderByEmployee(req: Request, res: Response) {
 
 export async function listLiveRiders(req: Request, res: Response) {
   const filter: Record<string, unknown> = { ...buildTenantFilter(req.user!), deletedAt: null, status: { $ne: "inactive" } };
-  if (req.query.branchId) filter.branchId = req.query.branchId;
+  if (req.query.branchId) {
+    const mainId = String(req.query.branchId);
+    const branchIds = await expandMainBranchIds(mainId);
+    filter.branchId = branchIdFilter(mainId, branchIds);
+  }
 
   const riders = await Rider.find(filter)
     .populate("employeeId", "firstName lastName phone")
@@ -175,4 +187,128 @@ export async function listLiveRiders(req: Request, res: Response) {
   );
 
   return sendSuccess(res, withActive);
+}
+
+/** Live rider positions plus shortest planned route from warehouse to assigned stops */
+export async function listRiderLocationsWithRoutes(req: Request, res: Response) {
+  const { start, end, dateFrom, dateTo } = parseDeliveryDateRange(req.query as Record<string, unknown>);
+  const dateFilter = deliveryInDateRangeQuery(start, end);
+
+  const filter: Record<string, unknown> = {
+    ...buildTenantFilter(req.user!),
+    deletedAt: null,
+    status: { $ne: "inactive" },
+  };
+  if (req.query.branchId) {
+    const mainId = String(req.query.branchId);
+    const branchIds = await expandMainBranchIds(mainId);
+    filter.branchId = branchIdFilter(mainId, branchIds);
+  }
+
+  const riders = await Rider.find(filter)
+    .populate("employeeId", "firstName lastName phone")
+    .select("riderCode status isOnJourney currentLocation employeeId branchId")
+    .lean();
+
+  const branchIds = [...new Set(riders.map((r) => String(r.branchId)))];
+  const branches = await Branch.find({ _id: { $in: branchIds } })
+    .select("gpsCoordinates name")
+    .lean();
+  const warehouseByBranch = new Map(
+    branches.map((b) => [String(b._id), b.gpsCoordinates ?? { lat: 23.588, lng: 58.3829 }])
+  );
+
+  const snapshots = await Promise.all(
+    riders.map(async (rider) => {
+      const activeDelivery = await Delivery.findOne({
+        riderId: rider._id,
+        status: "in_transit",
+        deletedAt: null,
+        ...dateFilter,
+      })
+        .populate("customerId", "name phone address")
+        .populate("saleId", "saleNumber")
+        .lean();
+
+      const assigned = await Delivery.find({
+        riderId: rider._id,
+        deletedAt: null,
+        status: { $nin: ["cancelled"] },
+        "coordinates.lat": { $exists: true },
+        ...dateFilter,
+      })
+        .populate("customerId", "name phone")
+        .sort({ routeOrder: 1, promisedWindowStart: 1, createdAt: 1 })
+        .lean();
+
+      const remainingStops = assigned.length;
+      const origin = warehouseByBranch.get(String(rider.branchId)) ?? { lat: 23.588, lng: 58.3829 };
+
+      let route: {
+        points: { lat: number; lng: number; label?: string; deliveryId?: string; order: number }[];
+        pathGeometry: { lat: number; lng: number }[];
+        outboundDistanceKm: number;
+        returnDistanceKm: number;
+        roundTripDistanceKm: number;
+        totalDurationMin: number;
+        roundTripCost: number;
+        costPerKm: number;
+        stopCount: number;
+      } | null = null;
+
+      const stops = assigned
+        .filter((d) => d.coordinates?.lat != null && d.coordinates?.lng != null)
+        .map((d) => ({
+          id: String(d._id),
+          lat: d.coordinates!.lat,
+          lng: d.coordinates!.lng,
+        }));
+
+      if (stops.length > 0) {
+        const { optimized, road } = await planRoadRouteRoundTrip(origin, stops);
+        route = {
+          points: optimized.stops.map((s, i) => {
+            const del = assigned.find((d) => String(d._id) === s.id);
+            const customer = del?.customerId as { name?: string; phone?: string } | undefined;
+            return {
+              lat: s.lat,
+              lng: s.lng,
+              deliveryId: s.id,
+              order: i + 1,
+              label: customer?.name ?? customer?.phone ?? `Stop ${i + 1}`,
+            };
+          }),
+          pathGeometry: road?.pathGeometry ?? [],
+          outboundDistanceKm: road?.outboundDistanceKm ?? optimized.totalDistanceMeters / 1000,
+          returnDistanceKm: road?.returnDistanceKm ?? 0,
+          roundTripDistanceKm: road?.roundTripDistanceKm ?? optimized.totalDistanceMeters / 1000,
+          totalDurationMin: road?.roundTripDurationMin ?? Math.round(optimized.totalDurationSeconds / 60),
+          roundTripCost: road?.roundTripCost ?? (optimized.totalDistanceMeters / 1000) * 10,
+          costPerKm: road?.costPerKm ?? 10,
+          stopCount: optimized.stops.length,
+        };
+      }
+
+      return {
+        ...rider,
+        activeDelivery,
+        remainingStops,
+        route,
+        warehouse: origin,
+      };
+    })
+  );
+
+  const deliveryCount = snapshots.reduce((n, r) => n + (r.route?.stopCount ?? 0), 0);
+  const totalRouteCost = snapshots.reduce((n, r) => n + (r.route?.roundTripCost ?? 0), 0);
+  const totalRoundTripKm = snapshots.reduce((n, r) => n + (r.route?.roundTripDistanceKm ?? 0), 0);
+
+  return sendSuccess(res, {
+    dateFrom,
+    dateTo,
+    deliveryCount,
+    totalRouteCost,
+    totalRoundTripKm,
+    riders: snapshots,
+  });
 }

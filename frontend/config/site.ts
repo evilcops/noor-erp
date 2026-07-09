@@ -63,6 +63,7 @@ export const RIDERS_NAV: NavItem[] = [
   { title: "Dispatch", href: "/dispatch", icon: MapPin, permission: "delivery:assign" },
   { title: "Deliveries", href: "/deliveries", icon: Package, permission: "delivery:assign" },
   { title: "Clusters", href: "/clusters", icon: Layers, permission: "delivery:assign" },
+  { title: "Location", href: "/riders/location", icon: MapPin, permission: "rider:view" },
   { title: "Riders", href: "/riders", icon: Bike, permission: "rider:view" },
   {
     title: "My Deliveries",
@@ -102,6 +103,7 @@ export const ROUTE_PERMISSIONS: RoutePermissionRule[] = [
   { prefix: "/dispatch", permission: "delivery:assign" },
   { prefix: "/deliveries", permission: "delivery:assign" },
   { prefix: "/clusters", permission: "delivery:assign" },
+  { prefix: "/riders/location", permission: "rider:view" },
   { prefix: "/riders", permission: "rider:view", roles: ["rider"] },
   { prefix: "/documents", permission: "employee:view" },
   { prefix: "/notifications", permission: "notification:view" },
@@ -143,4 +145,13 @@ export function canAccessRoute(
 export function isNavActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/** Prefer the most specific nav href when several items match (e.g. /riders/location vs /riders). */
+export function getActiveNavHref(pathname: string, hrefs: string[]): string | null {
+  const sorted = [...hrefs].sort((a, b) => b.length - a.length);
+  for (const href of sorted) {
+    if (isNavActive(pathname, href)) return href;
+  }
+  return null;
 }

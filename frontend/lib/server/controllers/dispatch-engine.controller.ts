@@ -12,6 +12,7 @@ import {
 import { processStandingOrdersDue } from "../services/standing-order.service";
 import { sendSuccess } from "../utils/apiResponse";
 import { AppError } from "../utils/AppError";
+import { parseDeliveryDateRange } from "../utils/deliveryDateFilter";
 
 export async function getWarehouseQueue(req: Request, res: Response) {
   const companyId = String(req.user!.companyId ?? req.query.companyId ?? "");
@@ -78,7 +79,8 @@ export async function getFleetSnapshot(req: Request, res: Response) {
   const branchId = String(req.query.branchId ?? req.user!.branchId ?? "");
   if (!companyId || !branchId) throw new AppError("BAD_REQUEST", "companyId and branchId are required", 400);
 
-  const snapshot = await getFleetDispatchSnapshot(companyId, branchId);
+  const { start, end } = parseDeliveryDateRange(req.query as Record<string, unknown>);
+  const snapshot = await getFleetDispatchSnapshot(companyId, branchId, { start, end });
   return sendSuccess(res, snapshot);
 }
 

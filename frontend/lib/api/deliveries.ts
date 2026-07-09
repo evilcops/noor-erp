@@ -1,6 +1,6 @@
 import { apiRequest, apiRequestWithMeta } from "./client";
 import type { AssignDeliveryInput, Delivery, DispatchDashboard } from "@/types/delivery";
-import type { Rider } from "@/types/rider";
+import type { Rider, RiderRoutePlan } from "@/types/rider";
 
 export const deliveryApi = {
   list: (params?: {
@@ -11,6 +11,8 @@ export const deliveryApi = {
     riderId?: string;
     branchId?: string;
     scheduledDate?: string;
+    dateFrom?: string;
+    dateTo?: string;
   }) => {
     const q = new URLSearchParams();
     if (params?.page) q.set("page", String(params.page));
@@ -20,6 +22,8 @@ export const deliveryApi = {
     if (params?.riderId) q.set("riderId", params.riderId);
     if (params?.branchId) q.set("branchId", params.branchId);
     if (params?.scheduledDate) q.set("scheduledDate", params.scheduledDate);
+    if (params?.dateFrom) q.set("dateFrom", params.dateFrom);
+    if (params?.dateTo) q.set("dateTo", params.dateTo);
     const qs = q.toString();
     return apiRequestWithMeta<Delivery[]>(`/deliveries${qs ? `?${qs}` : ""}`);
   },
@@ -46,7 +50,14 @@ export const deliveryApi = {
   ) =>
     apiRequest<Delivery>(`/deliveries/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
 
-  dashboard: () => apiRequest<DispatchDashboard>("/deliveries/dashboard"),
+  dashboard: (params?: { branchId?: string; dateFrom?: string; dateTo?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.branchId) q.set("branchId", params.branchId);
+    if (params?.dateFrom) q.set("dateFrom", params.dateFrom);
+    if (params?.dateTo) q.set("dateTo", params.dateTo);
+    const qs = q.toString();
+    return apiRequest<DispatchDashboard>(`/deliveries/dashboard${qs ? `?${qs}` : ""}`);
+  },
 
   optimizeRoute: (riderId: string, scheduledDate: string, deliveryIds: string[]) =>
     apiRequest<{ journey: unknown; optimizedRoute: unknown; warehouse: { lat: number; lng: number } }>(
@@ -58,7 +69,9 @@ export const deliveryApi = {
     apiRequest<{ whatsappLink: string; message: string }>(`/deliveries/${id}/send-whatsapp`, { method: "POST" }),
 
   myDeliveries: () =>
-    apiRequest<{ rider: Rider; deliveries: Delivery[]; journey: unknown }>("/rider-app/deliveries"),
+    apiRequest<{ rider: Rider; deliveries: Delivery[]; journey: unknown; route: RiderRoutePlan | null }>(
+      "/rider-app/deliveries"
+    ),
 
   startJourney: () => apiRequest<{ rider: Rider }>("/rider-app/route/start", { method: "POST" }),
 
@@ -87,14 +100,19 @@ export const deliveryApi = {
       provisionalRiderId?: string;
     }>("/deliveries/predict-promise", { method: "POST", body: JSON.stringify(data) }),
 
-  fleetSnapshot: (branchId: string) =>
-    apiRequest<{
-      demandQueueTotal: number;
+  fleetSnapshot: (branchId: string, params?: { dateFrom?: string; dateTo?: string }) => {
+    const q = new URLSearchParams({ branchId });
+    if (params?.dateFrom) q.set("dateFrom", params.dateFrom);
+    if (params?.dateTo) q.set("dateTo", params.dateTo);
+    return apiRequest<{
+      totalDeliveries: number;
+      activeRiders: number;
       bySource: Record<string, number>;
       byCluster: { clusterId: string; code: string; count: number; totalValue: number }[];
       riders: { riderId: string; riderCode: string; status: string; predictedReturnAt?: string; activeStops: number }[];
       activeRuns: { runId: string; runNumber: string; riderCode: string; clusterIds: string[]; stops: number; deliveriesPerKm?: number }[];
-    }>(`/dispatch/snapshot?branchId=${branchId}`),
+    }>(`/dispatch/snapshot?${q.toString()}`);
+  },
 
   processStandingOrders: (branchId: string) =>
     apiRequest<{ processed: number; saleNumbers: string[] }>("/dispatch/standing-orders/process", {

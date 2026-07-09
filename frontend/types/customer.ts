@@ -1,5 +1,11 @@
 import type { Delivery } from "@/types/delivery";
 
+export interface CustomerCluster {
+  _id: string;
+  code?: string;
+  name?: string;
+}
+
 export interface Customer {
   _id: string;
   companyId: string;
@@ -8,12 +14,28 @@ export interface Customer {
   email?: string;
   address?: string;
   area?: string;
+  coordinates?: { lat: number; lng: number };
+  clusterId?: string | CustomerCluster | null;
+  branchId?: string | null;
   notes?: string;
   totalPurchases?: number;
   totalSpent?: number;
   lastPurchaseAt?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CustomerStats {
+  total: number;
+  inCluster: number;
+  outsideClusters: number;
+  noLocation: number;
+}
+
+export interface ResolveClusterResult {
+  coordinates: { lat: number; lng: number } | null;
+  cluster: { _id: string; code?: string; name?: string; radiusKm?: number } | null;
+  branch: { _id: string; name?: string; code?: string } | null;
 }
 
 export interface Sale {
@@ -63,5 +85,16 @@ export interface CreateCustomerInput {
   name?: string;
   address?: string;
   area?: string;
+  coordinates?: { lat: number; lng: number };
+  notes?: string;
+}
+
+export interface UpdateCustomerInput {
+  phone?: string;
+  email?: string;
+  name?: string;
+  address?: string;
+  area?: string;
+  coordinates?: { lat: number; lng: number };
   notes?: string;
 }

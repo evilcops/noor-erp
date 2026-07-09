@@ -25,6 +25,48 @@ import {
 } from "../services/inventory.service";
 import { notifyLowStock } from "../services/inventory-notification.service";
 import { createDeliveryFromSale } from "../services/delivery.service";
+import { resolveClusterForCompanyPoint } from "../services/cluster-grid.service";
+import { geocodeAddress } from "../services/geocoding.service";
+import { logger } from "../utils/logger";
+
+interface CustomerLocation {
+  coordinates?: { lat: number; lng: number };
+  clusterId?: mongoose.Types.ObjectId | null;
+  branchId?: mongoose.Types.ObjectId | null;
+}
+
+/**
+ * Resolve a customer's coordinates (from map pin or by geocoding the address) and
+ * find the delivery cluster that covers them. Returns nulls when outside all clusters.
+ */
+async function resolveCustomerLocation(
+  companyId: string,
+  data: { address?: string; coordinates?: { lat: number; lng: number } }
+): Promise<CustomerLocation> {
+  let coordinates =
+    data.coordinates?.lat != null && data.coordinates?.lng != null
+      ? { lat: data.coordinates.lat, lng: data.coordinates.lng }
+      : undefined;
+
+  // Location enrichment (geocoding + cluster match) must never block saving a customer.
+  try {
+    if (!coordinates && data.address?.trim()) {
+      coordinates = (await geocodeAddress(data.address)) ?? undefined;
+    }
+
+    if (!coordinates) return { coordinates: undefined, clusterId: null, branchId: null };
+
+    const cluster = await resolveClusterForCompanyPoint(companyId, coordinates);
+    return {
+      coordinates,
+      clusterId: cluster?._id ?? null,
+      branchId: cluster?.branchId ?? null,
+    };
+  } catch (error) {
+    logger.error("Customer location resolution failed", { error });
+    return { coordinates, clusterId: null, branchId: null };
+  }
+}
 
 async function generateSaleNumber(companyId: string) {
   const year = new Date().getFullYear();
@@ -72,11 +114,20 @@ async function findOrCreateCustomer(
     if (data.address?.trim()) customer.address = data.address.trim();
     if (data.area?.trim()) customer.area = data.area.trim();
     if (customer.phone !== phone) customer.phone = phone;
+    if (!customer.coordinates?.lat && customer.address) {
+      const location = await resolveCustomerLocation(companyId, { address: customer.address });
+      if (location.coordinates) {
+        customer.coordinates = location.coordinates;
+        customer.clusterId = location.clusterId;
+        customer.branchId = location.branchId;
+      }
+    }
     customer.updatedBy = userObjectId;
     await customer.save();
     return { customer, created: false };
   }
 
+  const location = await resolveCustomerLocation(companyId, { address: data.address });
   const created = await Customer.create({
     companyId,
     phone,
@@ -84,6 +135,9 @@ async function findOrCreateCustomer(
     name: data.name?.trim() || undefined,
     address: data.address?.trim() || undefined,
     area: data.area?.trim() || undefined,
+    coordinates: location.coordinates,
+    clusterId: location.clusterId,
+    branchId: location.branchId,
     createdBy: userObjectId,
     updatedBy: userObjectId,
   });
@@ -108,6 +162,11 @@ export async function createCustomer(req: Request, res: Response) {
   }
 
   const userObjectId = new mongoose.Types.ObjectId(String(req.user!._id));
+  const location = await resolveCustomerLocation(req.body.companyId, {
+    address: req.body.address,
+    coordinates: req.body.coordinates,
+  });
+
   const customer = await Customer.create({
     companyId: req.body.companyId,
     phone,
@@ -115,12 +174,19 @@ export async function createCustomer(req: Request, res: Response) {
     name: req.body.name?.trim() || undefined,
     address: req.body.address?.trim() || undefined,
     area: req.body.area?.trim() || undefined,
+    coordinates: location.coordinates,
+    clusterId: location.clusterId,
+    branchId: location.branchId,
     notes: req.body.notes?.trim() || undefined,
     createdBy: userObjectId,
     updatedBy: userObjectId,
   });
 
-  return sendSuccess(res, customer.toObject(), 201);
+  const populated = await Customer.findById(customer._id)
+    .populate("clusterId", "code name")
+    .lean();
+
+  return sendSuccess(res, populated ?? customer.toObject(), 201);
 }
 
 export async function listCustomers(req: Request, res: Response) {
@@ -134,6 +200,7 @@ export async function listCustomers(req: Request, res: Response) {
 
   const [items, total] = await Promise.all([
     Customer.find(filter)
+      .populate("clusterId", "code name")
       .sort(buildSortQuery(sortBy ?? "createdAt", sortOrder ?? "desc"))
       .skip(skip)
       .limit(limit)
@@ -157,8 +224,81 @@ export async function listCustomers(req: Request, res: Response) {
   return sendSuccess(res, withStats, 200, buildMeta(page, limit, total));
 }
 
+export async function resolveCustomerCluster(req: Request, res: Response) {
+  const companyId = String(req.query.companyId ?? "");
+  if (!companyId) throw new AppError("BAD_REQUEST", "companyId is required", 400);
+  assertCompanyAccess(req.user!, companyId);
+
+  const address = typeof req.query.address === "string" ? req.query.address : undefined;
+  const latRaw = req.query.lat;
+  const lngRaw = req.query.lng;
+
+  let coordinates: { lat: number; lng: number } | undefined;
+  if (latRaw != null && latRaw !== "" && lngRaw != null && lngRaw !== "") {
+    const lat = Number(latRaw);
+    const lng = Number(lngRaw);
+    if (!Number.isNaN(lat) && !Number.isNaN(lng)) coordinates = { lat, lng };
+  }
+
+  try {
+    if (!coordinates && address?.trim()) {
+      coordinates = (await geocodeAddress(address)) ?? undefined;
+    }
+
+    if (!coordinates) {
+      return sendSuccess(res, { coordinates: null, cluster: null, branch: null });
+    }
+
+    const cluster = await resolveClusterForCompanyPoint(companyId, coordinates);
+
+    let branch: { _id: string; name?: string; code?: string } | null = null;
+    if (cluster?.branchId) {
+      const b = await Branch.findById(cluster.branchId).select("name code").lean();
+      if (b) branch = { _id: String(b._id), name: b.name, code: b.code };
+    }
+
+    return sendSuccess(res, {
+      coordinates,
+      cluster: cluster
+        ? {
+            _id: String(cluster._id),
+            code: cluster.code,
+            name: cluster.name,
+            radiusKm: cluster.radiusKm,
+          }
+        : null,
+      branch,
+    });
+  } catch (error) {
+    logger.error("resolveCustomerCluster failed", { error });
+    return sendSuccess(res, { coordinates: coordinates ?? null, cluster: null, branch: null });
+  }
+}
+
+export async function getCustomerStats(req: Request, res: Response) {
+  const base = { ...buildTenantFilter(req.user!), deletedAt: null };
+
+  const [total, withCoordinates, inCluster] = await Promise.all([
+    Customer.countDocuments(base),
+    Customer.countDocuments({ ...base, "coordinates.lat": { $ne: null, $exists: true } }),
+    Customer.countDocuments({ ...base, clusterId: { $ne: null } }),
+  ]);
+
+  const noLocation = total - withCoordinates;
+  const outsideClusters = Math.max(withCoordinates - inCluster, 0);
+
+  return sendSuccess(res, {
+    total,
+    inCluster,
+    outsideClusters,
+    noLocation,
+  });
+}
+
 export async function getCustomer(req: Request, res: Response) {
-  const customer = await Customer.findOne({ _id: req.params.id, deletedAt: null }).lean();
+  const customer = await Customer.findOne({ _id: req.params.id, deletedAt: null })
+    .populate("clusterId", "code name")
+    .lean();
   if (!customer) throw new AppError("NOT_FOUND", "Customer not found", 404);
 
   const sales = await Sale.find({ customerId: customer._id })
@@ -176,6 +316,75 @@ export async function getCustomer(req: Request, res: Response) {
     totalPurchases: sales.length,
     totalSpent,
   });
+}
+
+export async function updateCustomer(req: Request, res: Response) {
+  const customer = await Customer.findOne({ _id: req.params.id, deletedAt: null });
+  if (!customer) throw new AppError("NOT_FOUND", "Customer not found", 404);
+  assertCompanyAccess(req.user!, String(customer.companyId));
+
+  const body = req.body as {
+    phone?: string;
+    email?: string;
+    name?: string;
+    address?: string;
+    area?: string;
+    coordinates?: { lat: number; lng: number } | null;
+    notes?: string;
+  };
+
+  if (body.phone !== undefined) {
+    const phone = normalizePhone(body.phone);
+    if (!phone) throw new AppError("BAD_REQUEST", "A valid customer phone number is required", 400);
+    if (phone !== customer.phone) {
+      const dup = await findCustomerByPhone(String(customer.companyId), body.phone);
+      if (dup && String(dup._id) !== String(customer._id)) {
+        throw new AppError(
+          "CONFLICT",
+          `A customer with this phone already exists${dup.name ? `: ${dup.name}` : ""}.`,
+          409
+        );
+      }
+      customer.phone = phone;
+    }
+  }
+
+  if (body.name !== undefined) customer.name = body.name.trim() || undefined;
+  if (body.email !== undefined) customer.email = body.email?.trim() || undefined;
+  if (body.area !== undefined) customer.area = body.area.trim() || undefined;
+  if (body.notes !== undefined) customer.notes = body.notes.trim() || undefined;
+
+  const addressProvided = body.address !== undefined;
+  const coordsProvided = body.coordinates !== undefined;
+  if (addressProvided) customer.address = body.address?.trim() || undefined;
+
+  if (addressProvided || coordsProvided) {
+    const location = await resolveCustomerLocation(String(customer.companyId), {
+      address: customer.address,
+      coordinates: body.coordinates ?? undefined,
+    });
+    customer.coordinates = location.coordinates;
+    customer.clusterId = location.clusterId;
+    customer.branchId = location.branchId;
+  }
+
+  customer.updatedBy = new mongoose.Types.ObjectId(String(req.user!._id));
+  await customer.save();
+
+  const populated = await Customer.findById(customer._id).populate("clusterId", "code name").lean();
+  return sendSuccess(res, populated ?? customer.toObject());
+}
+
+export async function deleteCustomer(req: Request, res: Response) {
+  const customer = await Customer.findOne({ _id: req.params.id, deletedAt: null });
+  if (!customer) throw new AppError("NOT_FOUND", "Customer not found", 404);
+  assertCompanyAccess(req.user!, String(customer.companyId));
+
+  customer.deletedAt = new Date();
+  customer.updatedBy = new mongoose.Types.ObjectId(String(req.user!._id));
+  await customer.save();
+
+  return sendSuccess(res, { message: "Customer deleted" });
 }
 
 export async function recordSale(req: Request, res: Response) {

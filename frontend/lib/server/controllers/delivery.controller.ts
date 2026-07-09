@@ -2,7 +2,6 @@ import type { Request, Response } from "express";
 import { Delivery } from "../models/Delivery.model";
 import { Rider } from "../models/Rider.model";
 import { RiderJourney } from "../models/RiderJourney.model";
-import { Branch } from "../models/Branch.model";
 import { Sale } from "../models/Sale.model";
 import { buildTenantFilter } from "../services/permission.service";
 import {
@@ -13,6 +12,7 @@ import {
 import { optimizeRoute } from "../services/route-optimization.service";
 import { buildWhatsAppOrderLink } from "../services/delivery.service";
 import { advanceWarehouseStatus, optimiseFleetPlan, handleCustomerUnavailable, provisionalAssignRider } from "../services/dispatch-engine.service";
+import { buildRiderRoutePlan } from "../services/rider-route.service";
 import {
   buildMeta,
   buildSortQuery,
@@ -20,6 +20,8 @@ import {
   sendSuccess,
 } from "../utils/apiResponse";
 import { AppError } from "../utils/AppError";
+import { deliveryInDateRangeQuery, formatLocalDate, parseDeliveryDateRange } from "../utils/deliveryDateFilter";
+import { branchIdFilter, expandMainBranchIds, getBranchWarehousePoint } from "../utils/branchScope";
 
 async function getAuthenticatedRider(req: Request) {
   if (req.user!.role !== "rider") {
@@ -55,7 +57,10 @@ export async function listDeliveries(req: Request, res: Response) {
   if (req.query.status) filter.status = req.query.status;
   if (req.query.riderId) filter.riderId = req.query.riderId;
   if (req.query.branchId) filter.branchId = req.query.branchId;
-  if (req.query.scheduledDate) {
+  if (req.query.dateFrom || req.query.dateTo) {
+    const { start, end } = parseDeliveryDateRange(req.query as Record<string, unknown>);
+    Object.assign(filter, deliveryInDateRangeQuery(start, end));
+  } else if (req.query.scheduledDate) {
     const day = new Date(String(req.query.scheduledDate));
     day.setHours(0, 0, 0, 0);
     const dayEnd = new Date(day);
@@ -277,8 +282,7 @@ export async function optimizeRiderRoute(req: Request, res: Response) {
   const rider = await Rider.findOne({ _id: riderId, ...tenant, deletedAt: null });
   if (!rider) throw new AppError("NOT_FOUND", "Rider not found", 404);
 
-  const branch = await Branch.findById(rider.branchId).lean();
-  const origin = branch?.gpsCoordinates ?? { lat: 23.588, lng: 58.3829 };
+  const origin = await getBranchWarehousePoint(rider.branchId);
 
   const deliveries = await Delivery.find({
     _id: { $in: deliveryIds },
@@ -373,34 +377,39 @@ export async function sendDeliveryWhatsApp(req: Request, res: Response) {
 
 export async function getDispatchDashboard(req: Request, res: Response) {
   const tenant = buildTenantFilter(req.user!);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const { start, end } = parseDeliveryDateRange(req.query as Record<string, unknown>);
+  const dateFilter = deliveryInDateRangeQuery(start, end);
 
-  const baseFilter = { ...tenant, deletedAt: null, scheduledDate: { $gte: today, $lt: tomorrow } };
+  const filter: Record<string, unknown> = { ...tenant, deletedAt: null, ...dateFilter };
 
-  const [pending, scheduled, inTransit, delivered, riders] = await Promise.all([
-    Delivery.countDocuments({ ...baseFilter, status: "pending_assignment" }),
-    Delivery.countDocuments({ ...baseFilter, status: "scheduled" }),
-    Delivery.countDocuments({ ...tenant, deletedAt: null, status: "in_transit" }),
-    Delivery.countDocuments({ ...baseFilter, status: "delivered" }),
-    Rider.countDocuments({ ...tenant, deletedAt: null, status: { $ne: "inactive" } }),
+  if (req.query.branchId) {
+    const mainId = String(req.query.branchId);
+    const branchIds = await expandMainBranchIds(mainId);
+    filter.branchId = branchIdFilter(mainId, branchIds);
+  }
+
+  const [pending, scheduled, inTransit, delivered, activeRiderIds, recentPending] = await Promise.all([
+    Delivery.countDocuments({ ...filter, status: "pending_assignment" }),
+    Delivery.countDocuments({ ...filter, status: "scheduled" }),
+    Delivery.countDocuments({ ...filter, status: "in_transit" }),
+    Delivery.countDocuments({ ...filter, status: "delivered" }),
+    Delivery.distinct("riderId", {
+      ...filter,
+      riderId: { $exists: true, $ne: null },
+      status: { $in: ["scheduled", "in_transit", "delivered"] },
+    }),
+    Delivery.find({ ...filter, status: "pending_assignment" })
+      .populate("customerId", "name phone area address coordinates")
+      .populate("saleId", "saleNumber totalAmount quantity")
+      .sort({ priorityScore: -1, createdAt: -1 })
+      .limit(20)
+      .lean(),
   ]);
 
-  const recentPending = await Delivery.find({
-    ...tenant,
-    deletedAt: null,
-    status: "pending_assignment",
-  })
-    .populate("customerId", "name phone area address")
-    .populate("saleId", "saleNumber totalAmount quantity")
-    .sort({ priorityScore: -1, createdAt: -1 })
-    .limit(10)
-    .lean();
-
   return sendSuccess(res, {
-    stats: { pending, scheduled, inTransit, delivered, activeRiders: riders },
+    dateFrom: formatLocalDate(start),
+    dateTo: formatLocalDate(end),
+    stats: { pending, scheduled, inTransit, delivered, activeRiders: activeRiderIds.length },
     recentPending,
   });
 }
@@ -528,5 +537,14 @@ export async function getMyDeliveries(req: Request, res: Response) {
     scheduledDate: { $gte: today, $lt: tomorrow },
   }).lean();
 
-  return sendSuccess(res, { rider, deliveries, journey });
+  const branch = rider.branchId as { name?: string; gpsCoordinates?: { lat: number; lng: number } } | null;
+  const warehouse = await getBranchWarehousePoint(rider.branchId);
+  const warehousePoint = {
+    ...warehouse,
+    label: branch?.name ?? "Warehouse",
+  };
+
+  const route = await buildRiderRoutePlan(warehousePoint, deliveries);
+
+  return sendSuccess(res, { rider, deliveries, journey, route });
 }

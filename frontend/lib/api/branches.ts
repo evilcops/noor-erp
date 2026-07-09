@@ -3,7 +3,7 @@ import type { DeliveryExpandedRegion } from "@/lib/compass-directions";
 import type { CreateBranchInput, Branch, UpdateBranchInput } from "@/types/branch";
 import type { PaginatedParams } from "@/types/api";
 
-export type { Branch } from "@/types/branch";
+export type { Branch, CreateBranchInput, UpdateBranchInput };
 
 export const branchApi = {
   getAll: (params: PaginatedParams & { companyId?: string; type?: "main" | "sub"; parentBranchId?: string } = {}) =>

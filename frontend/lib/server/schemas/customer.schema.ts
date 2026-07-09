@@ -15,6 +15,17 @@ export const createCustomerSchema = z.object({
   name: z.string().optional(),
   address: z.string().optional(),
   area: z.string().optional(),
+  coordinates: z.object({ lat: z.number(), lng: z.number() }).optional(),
+  notes: z.string().optional(),
+});
+
+export const updateCustomerSchema = z.object({
+  phone: z.string().min(1).optional(),
+  email: optionalEmail,
+  name: z.string().optional(),
+  address: z.string().optional(),
+  area: z.string().optional(),
+  coordinates: z.object({ lat: z.number(), lng: z.number() }).nullable().optional(),
   notes: z.string().optional(),
 });
 

@@ -184,6 +184,50 @@ export function pointInCluster(
   return distanceKm(point, cluster.center) <= cluster.radiusKm;
 }
 
+/**
+ * Find the active cluster (across all main branches of a company) that contains a point.
+ * Ties are broken by the closest cluster center. Optionally restrict to one branch.
+ */
+export async function resolveClusterForCompanyPoint(
+  companyId: Types.ObjectId | string,
+  coordinates?: GeoCoordinates | null,
+  branchId?: Types.ObjectId | string
+) {
+  if (coordinates?.lat == null || coordinates?.lng == null) return null;
+
+  const filter: Record<string, unknown> = {
+    companyId,
+    status: "active",
+    deletedAt: null,
+  };
+  if (branchId) filter.branchId = branchId;
+
+  const clusters = await DeliveryCluster.find(filter).lean();
+
+  let best: (typeof clusters)[number] | null = null;
+  let bestDist = Infinity;
+
+  for (const c of clusters) {
+    const inside = pointInCluster(coordinates, {
+      center: c.center,
+      origin: c.origin ?? undefined,
+      shape: c.shape,
+      cellSizeKm: c.cellSizeKm,
+      radiusKm: c.radiusKm,
+      sectorStartDeg: c.sectorStartDeg,
+      sectorEndDeg: c.sectorEndDeg,
+    });
+    if (!inside) continue;
+    const dist = distanceKm(coordinates, c.center);
+    if (dist < bestDist) {
+      best = c;
+      bestDist = dist;
+    }
+  }
+
+  return best;
+}
+
 /** Polygon ring for a pie-sector wedge (warehouse at origin) */
 export function sectorPolygonLatLng(
   origin: GeoCoordinates,

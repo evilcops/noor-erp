@@ -9,6 +9,10 @@ export interface ICustomer extends Document {
   address?: string;
   area?: string;
   coordinates?: { lat: number; lng: number };
+  /** Delivery cluster covering this customer's location (null if outside all clusters) */
+  clusterId?: mongoose.Types.ObjectId | null;
+  /** Main branch whose cluster grid covers this customer */
+  branchId?: mongoose.Types.ObjectId | null;
   notes?: string;
   createdBy?: mongoose.Types.ObjectId;
   updatedBy?: mongoose.Types.ObjectId;
@@ -26,6 +30,8 @@ const customerSchema = new Schema<ICustomer>(
     address: String,
     area: String,
     coordinates: { lat: Number, lng: Number },
+    clusterId: { type: Schema.Types.ObjectId, ref: "DeliveryCluster", default: null, index: true },
+    branchId: { type: Schema.Types.ObjectId, ref: "Branch", default: null, index: true },
     notes: String,
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
     updatedBy: { type: Schema.Types.ObjectId, ref: "User" },
