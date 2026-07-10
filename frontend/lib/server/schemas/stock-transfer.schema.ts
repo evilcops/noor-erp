@@ -7,7 +7,7 @@ const transferItemSchema = z.object({
 });
 
 export const createStockTransferSchema = z.object({
-  companyId: z.string().min(1),
+  companyId: z.string().min(1).optional(),
   fromBranchId: z.string().min(1),
   toBranchId: z.string().min(1),
   items: z.array(transferItemSchema).min(1),

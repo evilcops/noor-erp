@@ -8,6 +8,8 @@ import {
   assertBranchAccess,
   assertCompanyAccess,
   buildTenantFilter,
+  resolveRequestCompanyId,
+  resolveRequestTenant,
 } from "../services/permission.service";
 import {
   buildMeta,
@@ -87,14 +89,17 @@ export async function deleteProductImage(req: Request, res: Response) {
 }
 
 export async function createProduct(req: Request, res: Response) {
-  assertCompanyAccess(req.user!, req.body.companyId);
+  const { companyId } = await resolveRequestTenant(req.user!, {
+    companyId: req.body.companyId,
+    branchId: req.body.branchId ?? req.body.initialStock?.branchId,
+  });
 
-  const sku = req.body.sku || (await generateSku(req.body.companyId));
-  const code = req.body.code || (await generateProductCode(req.body.companyId));
+  const sku = req.body.sku || (await generateSku(companyId));
+  const code = req.body.code || (await generateProductCode(companyId));
   const barcode = req.body.barcode || generateBarcode(sku);
 
   const existing = await Product.findOne({
-    companyId: req.body.companyId,
+    companyId,
     sku,
     deletedAt: null,
   });
@@ -102,6 +107,7 @@ export async function createProduct(req: Request, res: Response) {
 
   const product = await Product.create({
     ...req.body,
+    companyId,
     sku,
     code,
     barcode,
@@ -113,10 +119,10 @@ export async function createProduct(req: Request, res: Response) {
   await product.save();
 
   if (req.body.initialStock?.branchId) {
-    assertBranchAccess(req.user!, req.body.initialStock.branchId, req.body.companyId);
+    assertBranchAccess(req.user!, req.body.initialStock.branchId, companyId);
     if (req.body.initialStock.quantity > 0) {
       await updateStockLevel({
-        companyId: req.body.companyId,
+        companyId,
         branchId: req.body.initialStock.branchId,
         productId: product._id,
         quantity: req.body.initialStock.quantity,

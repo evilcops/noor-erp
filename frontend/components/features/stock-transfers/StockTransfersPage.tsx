@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/Label";
 import { BranchSubBranchSelect } from "@/components/common/BranchSubBranchSelect";
 import { Select } from "@/components/ui/Select";
 import { resolveMainAndSubBranchId } from "@/lib/branch-utils";
-import { useAuth, useBranch } from "@/hooks";
+import { useAuth, useBranch, useTenantIds } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { stockTransferApi } from "@/lib/api/inventory";
 import { productApi } from "@/lib/api/products";
@@ -42,7 +42,7 @@ export function StockTransfersPage() {
   const [dispatchQtys, setDispatchQtys] = useState<Record<string, string>>({});
   const [receiveQtys, setReceiveQtys] = useState<Record<string, string>>({});
 
-  const companyId = user?.companyId ?? "";
+  const { companyId } = useTenantIds();
 
   const { data, isLoading } = useQuery({
     queryKey: ["stock-transfers", page],

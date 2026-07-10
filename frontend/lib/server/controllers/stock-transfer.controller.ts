@@ -6,6 +6,7 @@ import {
   assertBranchAccess,
   assertCompanyAccess,
   buildTenantFilter,
+  resolveRequestTenant,
 } from "../services/permission.service";
 import {
   buildMeta,
@@ -22,17 +23,21 @@ import {
 import { notifyStockTransferRequest } from "../services/inventory-notification.service";
 
 export async function createTransfer(req: Request, res: Response) {
-  assertCompanyAccess(req.user!, req.body.companyId);
-  assertBranchAccess(req.user!, req.body.fromBranchId, req.body.companyId);
-  assertBranchAccess(req.user!, req.body.toBranchId, req.body.companyId);
+  const { companyId } = await resolveRequestTenant(req.user!, {
+    companyId: req.body.companyId,
+    branchId: req.body.fromBranchId,
+  });
+  assertBranchAccess(req.user!, req.body.fromBranchId, companyId);
+  assertBranchAccess(req.user!, req.body.toBranchId, companyId);
 
   if (req.body.fromBranchId === req.body.toBranchId) {
     throw new AppError("BAD_REQUEST", "Source and destination branches must differ", 400);
   }
 
-  const transferNumber = await generateTransferNumber(req.body.companyId);
+  const transferNumber = await generateTransferNumber(companyId);
   const transfer = await StockTransfer.create({
     ...req.body,
+    companyId,
     transferNumber,
     status: "requested",
     requestedBy: req.user!._id,

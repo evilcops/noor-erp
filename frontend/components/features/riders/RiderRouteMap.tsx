@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -38,16 +38,62 @@ function FitRoute({ route }: { route: RiderRoutePlan }) {
   return null;
 }
 
-export function RiderRouteMap({ route, height = "280px" }: { route: RiderRoutePlan; height?: string }) {
+/** Split round-trip geometry into outbound (warehouse → stops) and return (last stop → warehouse). */
+function splitRoundTripPolylines(route: RiderRoutePlan): {
+  outbound: [number, number][];
+  returnLeg: [number, number][];
+  full: [number, number][];
+} {
+  const warehouse = route.warehouse;
+  const stops = route.stops;
+
+  if (route.pathGeometry.length > 1) {
+    const full = route.pathGeometry.map((p) => [p.lat, p.lng] as [number, number]);
+    if (!stops.length) return { outbound: full, returnLeg: [], full };
+
+    const lastStop = stops[stops.length - 1];
+    let splitIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < full.length; i++) {
+      const d =
+        (full[i][0] - lastStop.lat) ** 2 + (full[i][1] - lastStop.lng) ** 2;
+      if (d < bestDist) {
+        bestDist = d;
+        splitIdx = i;
+      }
+    }
+    return {
+      outbound: full.slice(0, splitIdx + 1),
+      returnLeg: full.slice(splitIdx),
+      full,
+    };
+  }
+
+  const outbound: [number, number][] = [
+    [warehouse.lat, warehouse.lng],
+    ...stops.map((s) => [s.lat, s.lng] as [number, number]),
+  ];
+  const returnLeg: [number, number][] =
+    stops.length > 0
+      ? [
+          [stops[stops.length - 1].lat, stops[stops.length - 1].lng],
+          [warehouse.lat, warehouse.lng],
+        ]
+      : [];
+  return { outbound, returnLeg, full: [...outbound, ...returnLeg.slice(1)] };
+}
+
+export function RiderRouteMap({
+  route,
+  height = "280px",
+  showReturnLeg = false,
+}: {
+  route: RiderRoutePlan;
+  height?: string;
+  showReturnLeg?: boolean;
+}) {
   const center = route.warehouse ?? route.stops[0] ?? { lat: 23.588, lng: 58.3829 };
-  const polyline: [number, number][] =
-    route.pathGeometry.length > 1
-      ? route.pathGeometry.map((p) => [p.lat, p.lng] as [number, number])
-      : [
-          [route.warehouse.lat, route.warehouse.lng],
-          ...route.stops.map((s) => [s.lat, s.lng] as [number, number]),
-          [route.warehouse.lat, route.warehouse.lng],
-        ];
+  const { outbound, returnLeg, full } = useMemo(() => splitRoundTripPolylines(route), [route]);
 
   return (
     <div className="overflow-hidden rounded-lg border border-border" style={{ height }}>
@@ -61,8 +107,16 @@ export function RiderRouteMap({ route, height = "280px" }: { route: RiderRoutePl
         {route.stops.map((stop) => (
           <Marker key={stop.deliveryId} position={[stop.lat, stop.lng]} icon={stopIcon(stop.order)} />
         ))}
-        {polyline.length > 1 ? (
-          <Polyline positions={polyline} pathOptions={{ color: "#6366F1", weight: 4, opacity: 0.85 }} />
+        {showReturnLeg && returnLeg.length > 1 ? (
+          <>
+            <Polyline positions={outbound} pathOptions={{ color: "#6366F1", weight: 4, opacity: 0.9 }} />
+            <Polyline
+              positions={returnLeg}
+              pathOptions={{ color: "#10B981", weight: 4, opacity: 0.75, dashArray: "8 6" }}
+            />
+          </>
+        ) : full.length > 1 ? (
+          <Polyline positions={full} pathOptions={{ color: "#6366F1", weight: 4, opacity: 0.85 }} />
         ) : null}
       </MapContainer>
     </div>

@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { Supplier } from "../models/Supplier.model";
 import { PurchaseOrder } from "../models/PurchaseOrder.model";
-import { assertCompanyAccess, buildTenantFilter } from "../services/permission.service";
+import { buildTenantFilter, resolveRequestCompanyId } from "../services/permission.service";
 import {
   buildMeta,
   buildSortQuery,
@@ -11,10 +11,15 @@ import {
 import { AppError } from "../utils/AppError";
 
 export async function createSupplier(req: Request, res: Response) {
-  assertCompanyAccess(req.user!, req.body.companyId);
+  const companyId = await resolveRequestCompanyId(
+    req.user!,
+    req.body.companyId,
+    req.body.branchId
+  );
 
   const supplier = await Supplier.create({
     ...req.body,
+    companyId,
     createdBy: req.user!._id,
     updatedBy: req.user!._id,
   });

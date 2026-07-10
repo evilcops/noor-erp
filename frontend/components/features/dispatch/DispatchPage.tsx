@@ -35,6 +35,11 @@ function todayIso() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function formatEta(iso?: string) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
 function formatDateRange(from: string, to: string) {
   const fmt = (iso: string) => {
     const [y, m, day] = iso.split("-").map(Number);
@@ -100,7 +105,7 @@ export function DispatchPage() {
     queryKey: ["dispatch-dashboard", branchId, dateFrom, dateTo],
     queryFn: () => deliveryApi.dashboard({ branchId, dateFrom, dateTo }),
     enabled: !!user && !!branchId && dateFrom <= dateTo,
-    refetchInterval: 30000,
+    refetchInterval: 20_000,
   });
 
   const { data: liveRiders } = useQuery({
@@ -362,7 +367,7 @@ export function DispatchPage() {
         <div className="border-b border-border px-4 py-3">
           <h2 className="font-semibold">Pending Assignments</h2>
           <p className="text-xs text-muted-foreground">
-            Sorted by priority score · {formatDateRange(dateFrom, dateTo)}
+            Auto-optimised every 90s · ETA urgency + value + wait time · {formatDateRange(dateFrom, dateTo)}
           </p>
         </div>
         <div className="divide-y divide-border">
@@ -379,7 +384,15 @@ export function DispatchPage() {
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {d.area ?? d.deliveryAddress ?? "No address"} · Score {d.priorityScore}
+                    {d.estimatedArrival ? ` · ETA ${formatEta(d.estimatedArrival)}` : ""}
+                    {d.promisedWindowEnd ? ` · Promise by ${formatEta(d.promisedWindowEnd)}` : ""}
                   </p>
+                  {d.warehouseReadyAt ? (
+                    <p className="text-xs text-muted-foreground">
+                      Ready from warehouse {formatEta(d.warehouseReadyAt)}
+                      {d.travelTimeMinutes ? ` · ~${d.travelTimeMinutes} min travel` : ""}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusBadge status={d.status} />

@@ -7,6 +7,7 @@ import {
   assertBranchAccess,
   assertCompanyAccess,
   buildTenantFilter,
+  resolveRequestTenant,
 } from "../services/permission.service";
 import {
   buildMeta,
@@ -50,15 +51,19 @@ async function enrichPurchaseItems(
 }
 
 export async function createPurchase(req: Request, res: Response) {
-  assertCompanyAccess(req.user!, req.body.companyId);
-  assertBranchAccess(req.user!, req.body.branchId, req.body.companyId);
+  const { companyId, branchId } = await resolveRequestTenant(req.user!, {
+    companyId: req.body.companyId,
+    branchId: req.body.branchId,
+  });
 
   const items = await enrichPurchaseItems(req.body.items);
-  const poNumber = await generatePoNumber(req.body.companyId);
+  const poNumber = await generatePoNumber(companyId);
   const totalAmount = calcTotal(items);
 
   const po = await PurchaseOrder.create({
     ...req.body,
+    companyId,
+    branchId,
     items,
     poNumber,
     totalAmount,

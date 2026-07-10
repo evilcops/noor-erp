@@ -9,7 +9,7 @@ const optionalEmail = z
   .transform((value) => (value && value.trim() ? value.trim() : undefined));
 
 export const createCustomerSchema = z.object({
-  companyId: z.string().min(1),
+  companyId: z.string().min(1).optional(),
   phone: z.string().min(1),
   email: optionalEmail,
   name: z.string().optional(),
@@ -31,7 +31,7 @@ export const updateCustomerSchema = z.object({
 
 export const recordSaleSchema = z
   .object({
-    companyId: z.string().min(1),
+    companyId: z.string().min(1).optional(),
     branchId: z.string().min(1),
     productId: z.string().min(1),
     quantity: z.number().min(1),

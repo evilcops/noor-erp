@@ -77,6 +77,12 @@ export function InventoryPage() {
     { start: string; end: string; label: string }[]
   >([]);
   const [selectedWindow, setSelectedWindow] = useState<{ start: string; end: string } | null>(null);
+  const [promiseTiming, setPromiseTiming] = useState<{
+    preparationMinutes: number;
+    warehouseReadyAt: string;
+    travelTimeMinutes: number;
+    estimatedDeliveryAt: string;
+  } | null>(null);
 
   const isSuperAdmin = user?.role === "super_admin";
   const companyId = user?.companyId ?? branches[0]?.companyId ?? "";
@@ -187,6 +193,7 @@ export function InventoryPage() {
       setPromiseOpen(false);
       resetSellForm();
       setSelectedWindow(null);
+      setPromiseTiming(null);
       setCompletedSale(sale);
       setReceiptOpen(true);
       void qc.invalidateQueries({ queryKey: ["stock-levels"] });
@@ -199,10 +206,21 @@ export function InventoryPage() {
     mutationFn: async () => {
       const branchId = typeof selected!.branchId === "object" ? selected!.branchId._id : selected!.branchId;
       const qty = Number(sellForm.quantity);
+      const totalAmount = qty;
+
+      let coordinates: { lat: number; lng: number } | undefined;
+      if (!isNewCustomer && customerSelection) {
+        const customer = customers.find((c) => c._id === customerSelection);
+        if (customer?.coordinates?.lat != null && customer?.coordinates?.lng != null) {
+          coordinates = { lat: customer.coordinates.lat, lng: customer.coordinates.lng };
+        }
+      }
+
       return deliveryApi.predictPromise({
         companyId,
         branchId,
-        totalAmount: qty,
+        coordinates,
+        totalAmount,
         quantity: qty,
         earliestAcceptableAt: sellForm.earliestDelivery
           ? new Date(sellForm.earliestDelivery).toISOString()
@@ -210,6 +228,12 @@ export function InventoryPage() {
       });
     },
     onSuccess: (prediction) => {
+      setPromiseTiming({
+        preparationMinutes: prediction.preparationMinutes,
+        warehouseReadyAt: prediction.warehouseReadyAt,
+        travelTimeMinutes: prediction.travelTimeMinutes,
+        estimatedDeliveryAt: prediction.estimatedDeliveryAt,
+      });
       const primary = {
         start: prediction.promisedWindowStart,
         end: prediction.promisedWindowEnd,
@@ -398,6 +422,40 @@ export function InventoryPage() {
           <p className="text-sm text-muted-foreground">
             Select an achievable delivery window. Once confirmed, this becomes the customer&apos;s delivery promise.
           </p>
+          {promiseTiming ? (
+            <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+              <p className="font-medium">How we calculate this</p>
+              <ul className="mt-2 space-y-1 text-muted-foreground">
+                <li>
+                  Packing &amp; loading: <span className="text-foreground">{promiseTiming.preparationMinutes} min</span>
+                </li>
+                <li>
+                  Ready for dispatch:{" "}
+                  <span className="text-foreground">
+                    {new Date(promiseTiming.warehouseReadyAt).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </li>
+                {promiseTiming.travelTimeMinutes > 0 ? (
+                  <li>
+                    Travel to customer:{" "}
+                    <span className="text-foreground">~{promiseTiming.travelTimeMinutes} min</span>
+                  </li>
+                ) : null}
+                <li>
+                  Estimated arrival:{" "}
+                  <span className="font-medium text-foreground">
+                    {new Date(promiseTiming.estimatedDeliveryAt).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </li>
+              </ul>
+            </div>
+          ) : null}
           <div className="space-y-2">
             {promiseWindows.map((w) => (
               <label

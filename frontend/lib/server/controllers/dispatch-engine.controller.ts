@@ -6,31 +6,38 @@ import {
   handleCustomerUnavailable,
   handleRiderBreakdown,
   offerRescheduleWindows,
-  optimiseFleetPlan,
+  runDispatchCycle,
+  scheduleFleetOptimise,
   predictDeliveryPromise,
 } from "../services/dispatch-engine.service";
 import { processStandingOrdersDue } from "../services/standing-order.service";
+import { resolveRequestTenant } from "../services/permission.service";
 import { sendSuccess } from "../utils/apiResponse";
 import { AppError } from "../utils/AppError";
 import { parseDeliveryDateRange } from "../utils/deliveryDateFilter";
 
-export async function getWarehouseQueue(req: Request, res: Response) {
-  const companyId = String(req.user!.companyId ?? req.query.companyId ?? "");
-  const branchId = String(req.query.branchId ?? req.user!.branchId ?? "");
-  if (!companyId || !branchId) throw new AppError("BAD_REQUEST", "companyId and branchId are required", 400);
+async function tenantFromRequest(
+  req: Request,
+  source: "query" | "body"
+): Promise<{ companyId: string; branchId: string }> {
+  const input = source === "query" ? req.query : req.body;
+  return resolveRequestTenant(req.user!, {
+    companyId: typeof input.companyId === "string" ? input.companyId : undefined,
+    branchId: typeof input.branchId === "string" ? input.branchId : undefined,
+  });
+}
 
+export async function getWarehouseQueue(req: Request, res: Response) {
+  const { companyId, branchId } = await tenantFromRequest(req, "query");
   const queue = await getDemandQueue(companyId, branchId);
   return sendSuccess(res, queue);
 }
 
 export async function runFleetOptimisation(req: Request, res: Response) {
-  const companyId = String(req.user!.companyId ?? req.body.companyId ?? "");
-  const branchId = String(req.body.branchId ?? req.user!.branchId ?? "");
-  if (!companyId || !branchId) throw new AppError("BAD_REQUEST", "companyId and branchId are required", 400);
-
+  const { companyId, branchId } = await tenantFromRequest(req, "body");
   const { trigger } = req.body as { trigger?: string };
 
-  const result = await optimiseFleetPlan({
+  const result = await runDispatchCycle({
     companyId,
     branchId,
     trigger: trigger ?? "manual",
@@ -41,8 +48,6 @@ export async function runFleetOptimisation(req: Request, res: Response) {
 
 export async function predictPromise(req: Request, res: Response) {
   const {
-    companyId,
-    branchId,
     coordinates,
     totalAmount,
     quantity,
@@ -50,8 +55,8 @@ export async function predictPromise(req: Request, res: Response) {
     earliestAcceptableAt,
     orderSource,
   } = req.body as {
-    companyId: string;
-    branchId: string;
+    companyId?: string;
+    branchId?: string;
     coordinates?: { lat: number; lng: number };
     totalAmount: number;
     quantity: number;
@@ -59,6 +64,8 @@ export async function predictPromise(req: Request, res: Response) {
     earliestAcceptableAt?: string;
     orderSource?: string;
   };
+
+  const { companyId, branchId } = await tenantFromRequest(req, "body");
 
   const prediction = await predictDeliveryPromise({
     companyId,
@@ -75,10 +82,7 @@ export async function predictPromise(req: Request, res: Response) {
 }
 
 export async function getFleetSnapshot(req: Request, res: Response) {
-  const companyId = String(req.user!.companyId ?? req.query.companyId ?? "");
-  const branchId = String(req.query.branchId ?? req.user!.branchId ?? "");
-  if (!companyId || !branchId) throw new AppError("BAD_REQUEST", "companyId and branchId are required", 400);
-
+  const { companyId, branchId } = await tenantFromRequest(req, "query");
   const { start, end } = parseDeliveryDateRange(req.query as Record<string, unknown>);
   const snapshot = await getFleetDispatchSnapshot(companyId, branchId, { start, end });
   return sendSuccess(res, snapshot);
@@ -115,9 +119,7 @@ export async function riderBreakdown(req: Request, res: Response) {
 }
 
 export async function processStandingOrders(req: Request, res: Response) {
-  const companyId = String(req.user!.companyId ?? req.body.companyId ?? "");
-  const branchId = String(req.body.branchId ?? req.user!.branchId ?? "");
-  if (!companyId || !branchId) throw new AppError("BAD_REQUEST", "companyId and branchId are required", 400);
+  const { companyId, branchId } = await tenantFromRequest(req, "body");
 
   const result = await processStandingOrdersDue({
     companyId,
@@ -126,7 +128,7 @@ export async function processStandingOrders(req: Request, res: Response) {
   });
 
   if (result.processed > 0) {
-    void optimiseFleetPlan({ companyId, branchId, trigger: "standing_orders_due" });
+    scheduleFleetOptimise({ companyId, branchId, trigger: "standing_orders_due" });
   }
 
   return sendSuccess(res, result);

@@ -10,6 +10,7 @@ import { auditMiddleware } from "../middleware/audit";
 import { requirePermission } from "../middleware/permission";
 import { validate } from "../middleware/validation";
 import { ensureDevAdmin, runMigrations } from "../services/bootstrap.service";
+import { ensureBackgroundDispatchLoop } from "../services/dispatch-engine.service";
 import { AppError } from "../utils/AppError";
 import { logger } from "../utils/logger";
 import type { UploadedFile } from "../types/upload";
@@ -29,6 +30,7 @@ async function ensureDevAdminOnce() {
 async function runMigrationsOnce() {
   if (migrationsRan) return;
   await runMigrations();
+  ensureBackgroundDispatchLoop();
   migrationsRan = true;
 }
 

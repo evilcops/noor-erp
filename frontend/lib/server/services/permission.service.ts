@@ -1,6 +1,8 @@
 import type { Types } from "mongoose";
 import type { Action, Resource, UserRole } from "../config/constants";
 import { ROLE_PERMISSIONS } from "../config/constants";
+import { Branch } from "../models/Branch.model";
+import { Company } from "../models/Company.model";
 import type { IUser } from "../models/User.model";
 import { AppError } from "../utils/AppError";
 
@@ -71,6 +73,75 @@ export function assertCompanyAccess(
   if (String(user.companyId) !== String(companyId)) {
     throw new AppError("FORBIDDEN", "Company access denied", 403);
   }
+}
+
+/** Resolve company for create APIs — body value, else logged-in user's company. */
+export async function resolveRequestCompanyId(
+  user: IUser,
+  bodyCompanyId?: string | null,
+  bodyBranchId?: string | null
+): Promise<string> {
+  const tenant = await resolveRequestTenant(user, {
+    companyId: bodyCompanyId,
+    branchId: bodyBranchId,
+  });
+  return tenant.companyId;
+}
+
+/**
+ * Resolve companyId + branchId for API calls.
+ * Prefers explicit branchId (derives company from branch), then user profile, then first company/branch for super_admin.
+ */
+export async function resolveRequestTenant(
+  user: IUser,
+  input?: { companyId?: string | null; branchId?: string | null }
+): Promise<{ companyId: string; branchId: string }> {
+  const branchInput = input?.branchId?.trim() || (user.branchId ? String(user.branchId) : "");
+
+  if (branchInput) {
+    const branch = await Branch.findById(branchInput).select("companyId").lean();
+    if (!branch) {
+      throw new AppError("BAD_REQUEST", "Invalid branchId", 400);
+    }
+    const companyId = String(branch.companyId);
+    assertCompanyAccess(user, companyId);
+    assertBranchAccess(user, branchInput, companyId);
+    return { companyId, branchId: branchInput };
+  }
+
+  let companyId = input?.companyId?.trim() || (user.companyId ? String(user.companyId) : "");
+
+  if (!companyId && user.role === "super_admin") {
+    const company = await Company.findOne({ deletedAt: null }).sort({ createdAt: 1 }).select("_id").lean();
+    if (company) companyId = String(company._id);
+  }
+
+  if (!companyId) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "companyId is required — link your user to a company or pass branchId",
+      400
+    );
+  }
+
+  assertCompanyAccess(user, companyId);
+
+  const branch = await Branch.findOne({
+    companyId,
+    deletedAt: null,
+    parentBranchId: null,
+  })
+    .sort({ createdAt: 1 })
+    .select("_id")
+    .lean();
+
+  if (!branch) {
+    throw new AppError("BAD_REQUEST", "branchId is required — create a main branch first", 400);
+  }
+
+  const branchId = String(branch._id);
+  assertBranchAccess(user, branchId, companyId);
+  return { companyId, branchId };
 }
 
 export function assertBranchAccess(

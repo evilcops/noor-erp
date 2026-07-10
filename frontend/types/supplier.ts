@@ -30,7 +30,7 @@ export interface SupplierDetail extends Supplier {
 }
 
 export interface CreateSupplierInput {
-  companyId: string;
+  companyId?: string;
   name: string;
   contactPerson?: string;
   phone?: string;

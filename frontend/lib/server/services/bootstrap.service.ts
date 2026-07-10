@@ -59,6 +59,22 @@ export async function runMigrations(): Promise<void> {
       `Migration: added maternity leave bucket to ${maternityBalanceResult.modifiedCount} balance record(s)`
     );
   }
+
+  const company = await db.collection("companies").findOne({ deletedAt: null });
+  if (company) {
+    const userLinkResult = await db.collection("users").updateMany(
+      {
+        $or: [{ companyId: { $exists: false } }, { companyId: null }],
+        isActive: true,
+      },
+      { $set: { companyId: company._id } }
+    );
+    if (userLinkResult.modifiedCount > 0) {
+      logger.info(
+        `Migration: linked ${userLinkResult.modifiedCount} user(s) without companyId to ${company.name ?? company._id}`
+      );
+    }
+  }
 }
 
 /**

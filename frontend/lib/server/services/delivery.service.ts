@@ -2,15 +2,17 @@ import { Delivery } from "../models/Delivery.model";
 import type { ISale } from "../models/Sale.model";
 import type { ICustomer } from "../models/Customer.model";
 import { geocodeAddress } from "./geocoding.service";
-import { computePriorityScore } from "./delivery-scheduling.service";
 import { getDayOfWeekPriority } from "./route-optimization.service";
 import {
   predictDeliveryPromise,
   provisionalAssignRider,
   resolveClusterForPoint,
-  optimiseFleetPlan,
+  runDispatchCycle,
+  scheduleFleetOptimise,
+  canRiderAcceptNewOrders,
   type OrderSource,
 } from "./dispatch-engine.service";
+import { computeDispatchPriorityScore } from "./dispatch-priority.service";
 
 export async function generateDeliveryNumber(companyId: string): Promise<string> {
   const year = new Date().getFullYear();
@@ -89,10 +91,16 @@ export async function createDeliveryFromSale(
   );
 
   const deliveryNumber = await generateDeliveryNumber(String(sale.companyId));
-  const priorityScore = computePriorityScore({
+  const promisedWindowStart = options?.promisedWindowStart ?? promise.promisedWindowStart;
+  const promisedWindowEnd = options?.promisedWindowEnd ?? promise.promisedWindowEnd;
+
+  const priorityScore = computeDispatchPriorityScore({
+    priority: "normal",
     totalAmount: sale.totalAmount,
     quantity: sale.quantity,
-    priority: "normal",
+    promisedWindowEnd,
+    promisedWindowStart,
+    createdAt: new Date(),
     areaDemandScore: demandScore,
   });
 
@@ -104,8 +112,10 @@ export async function createDeliveryFromSale(
     status: { $nin: ["delivered", "cancelled"] },
   });
 
-  const promisedWindowStart = options?.promisedWindowStart ?? promise.promisedWindowStart;
-  const promisedWindowEnd = options?.promisedWindowEnd ?? promise.promisedWindowEnd;
+  let initialRiderId = promise.provisionalRiderId;
+  if (initialRiderId && !(await canRiderAcceptNewOrders(initialRiderId))) {
+    initialRiderId = undefined;
+  }
 
   const delivery = await Delivery.create({
     companyId: sale.companyId,
@@ -122,11 +132,14 @@ export async function createDeliveryFromSale(
     promisedWindowEnd,
     promiseAcceptedAt: options?.acceptPromise !== false ? new Date() : undefined,
     preparationMinutes: promise.preparationMinutes,
+    warehouseReadyAt: promise.warehouseReadyAt,
+    travelTimeMinutes: promise.travelTimeMinutes,
+    estimatedArrival: promise.estimatedDeliveryAt,
     timeSlotStart: promisedWindowStart,
     timeSlotEnd: promisedWindowEnd,
     scheduledDate: promisedWindowStart,
-    provisionalRiderId: promise.provisionalRiderId,
-    riderId: promise.provisionalRiderId,
+    provisionalRiderId: initialRiderId,
+    riderId: initialRiderId,
     clusterId: cluster?._id,
     deliveryAddress: customer.address,
     area: customer.area,
@@ -138,7 +151,7 @@ export async function createDeliveryFromSale(
 
   await provisionalAssignRider(String(delivery._id));
 
-  await optimiseFleetPlan({
+  await runDispatchCycle({
     companyId: String(sale.companyId),
     branchId: String(sale.branchId),
     trigger: "new_order",

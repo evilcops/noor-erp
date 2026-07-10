@@ -62,12 +62,6 @@ export function ReceiptActions({ companyName = "NOOR ERP", className, sale, purc
         Print
       </Button>
 
-      {sale ? (
-        <Button type="button" variant="secondary" onClick={handleSendToRider}>
-          <Bike className="mr-2 h-4 w-4" />
-          Send to Rider
-        </Button>
-      ) : null}
 
       {purchase ? (
         <Button

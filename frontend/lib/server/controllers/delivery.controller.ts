@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { Delivery } from "../models/Delivery.model";
+import { DeliveryRun } from "../models/DeliveryRun.model";
 import { Rider } from "../models/Rider.model";
 import { RiderJourney } from "../models/RiderJourney.model";
 import { Sale } from "../models/Sale.model";
@@ -11,8 +12,9 @@ import {
 } from "../services/delivery-scheduling.service";
 import { optimizeRoute } from "../services/route-optimization.service";
 import { buildWhatsAppOrderLink } from "../services/delivery.service";
-import { advanceWarehouseStatus, optimiseFleetPlan, handleCustomerUnavailable, provisionalAssignRider } from "../services/dispatch-engine.service";
+import { advanceWarehouseStatus, runDispatchCycle, scheduleFleetOptimise, handleCustomerUnavailable, provisionalAssignRider, onRiderBackAtWarehouse, countUndeliveredStops } from "../services/dispatch-engine.service";
 import { buildRiderRoutePlan } from "../services/rider-route.service";
+import { buildRouteSummaryFromRun } from "../services/rider-location.service";
 import {
   buildMeta,
   buildSortQuery,
@@ -180,7 +182,7 @@ export async function autoAssignDelivery(req: Request, res: Response) {
 
   await provisionalAssignRider(String(delivery._id));
 
-  await optimiseFleetPlan({
+  await runDispatchCycle({
     companyId: String(delivery.companyId),
     branchId: String(delivery.branchId),
     trigger: "auto_assign",
@@ -256,11 +258,21 @@ export async function updateDeliveryStatus(req: Request, res: Response) {
   }
 
   if (["delivered", "cancelled", "failed", "refused", "rescheduled"].includes(body.status)) {
-    void optimiseFleetPlan({
+    scheduleFleetOptimise({
       companyId: String(delivery.companyId),
       branchId: String(delivery.branchId),
       trigger: `delivery_${body.status}`,
     });
+
+    if (body.status === "delivered" && delivery.riderId) {
+      const remaining = await countUndeliveredStops(delivery.riderId);
+      if (remaining === 0) {
+        const result = await onRiderBackAtWarehouse(delivery.riderId);
+        if (result.assigned > 0) {
+          (req as Request & { nextRouteAssigned?: number }).nextRouteAssigned = result.assigned;
+        }
+      }
+    }
   }
 
   const populated = await Delivery.findById(delivery._id)
@@ -433,7 +445,28 @@ export async function startShift(req: Request, res: Response) {
   rider.dailyDeliveriesCompleted = 0;
   rider.dailyKmTravelled = 0;
   await rider.save();
+
+  scheduleFleetOptimise({
+    companyId: String(rider.companyId),
+    branchId: String(rider.branchId),
+    trigger: "rider_shift_start",
+  });
+
   return sendSuccess(res, { rider });
+}
+
+/** Rider app — share live GPS while on shift (uses delivery:edit, not rider:edit). */
+export async function updateMyRiderLocation(req: Request, res: Response) {
+  const rider = await getAuthenticatedRider(req);
+  if (!rider.isOnShift) {
+    throw new AppError("BAD_REQUEST", "Start your shift before sharing location", 400);
+  }
+
+  const { lat, lng } = req.body as { lat: number; lng: number };
+  rider.currentLocation = { lat, lng, updatedAt: new Date() };
+  await rider.save();
+
+  return sendSuccess(res, { lat, lng, updatedAt: rider.currentLocation.updatedAt });
 }
 
 export async function endShift(req: Request, res: Response) {
@@ -453,10 +486,45 @@ export async function endShift(req: Request, res: Response) {
   return sendSuccess(res, { rider });
 }
 
-/** Rider departs warehouse — route assignment becomes fixed */
+/** Rider departs warehouse — locks full route; no more orders can be added */
 export async function startRoute(req: Request, res: Response) {
   const rider = await getAuthenticatedRider(req);
   if (!rider.isOnShift) throw new AppError("BAD_REQUEST", "Start your shift first", 400);
+  if (rider.isOnJourney) throw new AppError("BAD_REQUEST", "Route already in progress", 400);
+
+  const pending = await Delivery.find({
+    riderId: rider._id,
+    deletedAt: null,
+    status: { $in: ["scheduled", "rescheduled"] },
+    assignmentLocked: false,
+    warehouseStatus: { $ne: "dispatched" },
+  })
+    .populate("customerId", "name phone")
+    .sort({ routeOrder: 1, timeSlotStart: 1, createdAt: 1 })
+    .lean();
+
+  if (!pending.length) {
+    throw new AppError(
+      "BAD_REQUEST",
+      "No orders on your route yet — load assigned stops at the warehouse first, or wait for dispatch",
+      400
+    );
+  }
+
+  await rider.populate("branchId", "name gpsCoordinates");
+  const branch = rider.branchId as { name?: string; gpsCoordinates?: { lat: number; lng: number } } | null;
+  const warehouse = await getBranchWarehousePoint(rider.branchId);
+  const warehousePoint = {
+    ...warehouse,
+    label: branch?.name ?? "Warehouse",
+  };
+
+  const routePlan = await buildRiderRoutePlan(warehousePoint, pending);
+  if (routePlan) {
+    for (const stop of routePlan.stops) {
+      await Delivery.updateOne({ _id: stop.deliveryId }, { routeOrder: stop.order });
+    }
+  }
 
   rider.isOnJourney = true;
   rider.status = "on_delivery";
@@ -465,8 +533,9 @@ export async function startRoute(req: Request, res: Response) {
   const deliveries = await Delivery.find({
     riderId: rider._id,
     deletedAt: null,
-    warehouseStatus: "loaded",
+    status: { $in: ["scheduled", "rescheduled"] },
     assignmentLocked: false,
+    warehouseStatus: { $ne: "dispatched" },
   });
 
   for (const d of deliveries) {
@@ -488,16 +557,43 @@ export async function startRoute(req: Request, res: Response) {
     await firstStop.save();
   }
 
-  return sendSuccess(res, { rider, firstStop });
+  await DeliveryRun.updateMany(
+    {
+      riderId: rider._id,
+      status: { $in: ["planning", "loading"] },
+      assignmentLocked: false,
+    },
+    {
+      status: "active",
+      assignmentLocked: true,
+      departedAt: new Date(),
+      startedAt: new Date(),
+    }
+  );
+
+  return sendSuccess(res, {
+    rider,
+    firstStop,
+    route: routePlan,
+    stopsDispatched: deliveries.length,
+  });
 }
 
 export async function returnToWarehouse(req: Request, res: Response) {
   const rider = await getAuthenticatedRider(req);
-  rider.status = "returning_to_warehouse";
-  rider.isOnJourney = false;
-  rider.predictedReturnAt = new Date(Date.now() + 20 * 60000);
-  await rider.save();
-  return sendSuccess(res, { rider });
+  const result = await onRiderBackAtWarehouse(rider._id);
+
+  const refreshed = await Rider.findById(rider._id).lean();
+  return sendSuccess(res, {
+    rider: refreshed,
+    ...result,
+    message:
+      result.assigned > 0
+        ? `Back at warehouse — next route assigned (${result.assigned} stops)`
+        : result.remainingStops
+          ? `${result.remainingStops} stop(s) still open`
+          : "Back at warehouse",
+  });
 }
 
 export async function startJourney(req: Request, res: Response) {
@@ -547,5 +643,43 @@ export async function getMyDeliveries(req: Request, res: Response) {
 
   const route = await buildRiderRoutePlan(warehousePoint, deliveries);
 
-  return sendSuccess(res, { rider, deliveries, journey, route });
+  const previousRun = await DeliveryRun.findOne({
+    riderId: rider._id,
+    status: "completed",
+    scheduledDate: { $gte: today, $lt: tomorrow },
+  })
+    .sort({ endedAt: -1 })
+    .lean();
+
+  const previousRoute = previousRun
+    ? await buildRouteSummaryFromRun(warehouse, previousRun)
+    : null;
+
+  const activeRun = await DeliveryRun.findOne({
+    riderId: rider._id,
+    status: { $in: ["planning", "loading", "active"] },
+    scheduledDate: { $gte: today, $lt: tomorrow },
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const pathSummary = route
+    ? [
+        warehousePoint.label ?? "Warehouse",
+        ...route.stops.map((s) => s.label || `Stop ${s.order}`),
+        warehousePoint.label ?? "Warehouse",
+      ].join(" → ")
+    : null;
+
+  return sendSuccess(res, {
+    rider,
+    deliveries,
+    journey,
+    route,
+    previousRoute,
+    routeLocked: rider.isOnJourney,
+    canAcceptMoreOrders: !rider.isOnJourney,
+    runNumber: activeRun?.runNumber,
+    pathSummary,
+  });
 }

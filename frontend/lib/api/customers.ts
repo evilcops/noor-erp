@@ -17,7 +17,13 @@ export const customerApi = {
 
   stats: () => apiRequest<CustomerStats>("/customers/stats"),
 
-  resolveCluster: (params: { companyId: string; lat?: number; lng?: number; address?: string }) =>
+  resolveCluster: (params: {
+    companyId?: string;
+    branchId?: string;
+    lat?: number;
+    lng?: number;
+    address?: string;
+  }) =>
     apiRequest<ResolveClusterResult>(
       `/customers/resolve-cluster${buildQuery(params as Record<string, string | number | undefined>)}`
     ),

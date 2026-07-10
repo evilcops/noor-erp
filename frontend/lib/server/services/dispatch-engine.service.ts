@@ -4,33 +4,61 @@ import { DeliveryCluster } from "../models/DeliveryCluster.model";
 import { DeliveryRun } from "../models/DeliveryRun.model";
 import { Rider } from "../models/Rider.model";
 import { Branch } from "../models/Branch.model";
+import { DISPATCH_CONFIG } from "../config/dispatch.config";
 import { haversineDistanceMeters } from "./geocoding.service";
-import { computePriorityScore } from "./delivery-scheduling.service";
 import { pointInCluster } from "./cluster-grid.service";
 import { optimizeRoute } from "./route-optimization.service";
 import { deliveryInDateRangeQuery, scheduledDateInRangeQuery } from "../utils/deliveryDateFilter";
 import { branchIdFilter, expandMainBranchIds, getBranchWarehousePoint } from "../utils/branchScope";
+import {
+  refreshQueuePriorities,
+  compareDeliveriesByDispatchPriority,
+} from "./dispatch-priority.service";
+import {
+  estimateTravelMinutes,
+  computeRouteStopEtas,
+  computeWarehouseReadyAt,
+  canRiderMeetPromises,
+} from "./dispatch-timing.service";
+import { autoAdvanceWarehousePrep } from "./dispatch-automation.service";
 
-/** Default warehouse prep time before dispatch (minutes) */
-export const DEFAULT_PREP_MINUTES = 15;
-export const PROMISE_WINDOW_MINUTES = 45;
-export const AVG_DELIVERY_STOP_MINUTES = 12;
-export const AVG_SPEED_MPS = 8;
-/** Orders above this value may get a dedicated cluster run */
-export const HIGH_VALUE_THRESHOLD = 40_000;
-/** Low-value orders are always grouped into the next cluster run */
-export const LOW_VALUE_THRESHOLD = 1_500;
-/** Riders within this radius of the warehouse are preferred for new assignments */
-export const WAREHOUSE_NEAR_RADIUS_KM = 3;
-export const WAREHOUSE_PROXIMITY_BONUS_MAX = 45;
-const RIDER_LOCATION_MAX_AGE_MS = 30 * 60 * 1000;
+/** @deprecated use DISPATCH_CONFIG — kept for existing imports */
+export const DEFAULT_PREP_MINUTES = DISPATCH_CONFIG.prepMinutes;
+export const PROMISE_WINDOW_MINUTES = DISPATCH_CONFIG.promiseWindowMinutes;
+export const AVG_DELIVERY_STOP_MINUTES = DISPATCH_CONFIG.avgStopServiceMinutes;
+export const AVG_SPEED_MPS = DISPATCH_CONFIG.avgSpeedMps;
+export const HIGH_VALUE_THRESHOLD = DISPATCH_CONFIG.highValueThreshold;
+export const LOW_VALUE_THRESHOLD = DISPATCH_CONFIG.lowValueThreshold;
+export const WAREHOUSE_NEAR_RADIUS_KM = DISPATCH_CONFIG.warehouseNearRadiusKm;
+export const WAREHOUSE_PROXIMITY_BONUS_MAX = DISPATCH_CONFIG.warehouseProximityBonusMax;
+export const LOAD_PENALTY_PER_STOP = DISPATCH_CONFIG.loadPenaltyPerStop;
+export const MAX_STOPS_PER_OPTIMISE_PASS = DISPATCH_CONFIG.maxStopsPerOptimisePass;
+const RIDER_LOCATION_MAX_AGE_MS = DISPATCH_CONFIG.riderLocationMaxAgeMs;
+
+const pendingOptimise = new Map<string, ReturnType<typeof setTimeout>>();
+let backgroundDispatchStarted = false;
+
+function riderCapacity(rider: { vehicleCapacityUnits?: number }) {
+  return rider.vehicleCapacityUnits ?? DISPATCH_CONFIG.defaultVehicleCapacity;
+}
+
+const EN_ROUTE_RIDER_STATUSES = ["on_delivery", "loading"] as const;
+const UNAVAILABLE_RIDER_STATUSES = [
+  "offline",
+  "inactive",
+  "off_duty",
+  "break",
+  ...EN_ROUTE_RIDER_STATUSES,
+] as const;
 
 type DeliveryLean = {
   _id: mongoose.Types.ObjectId;
   clusterId?: mongoose.Types.ObjectId;
   saleId?: { totalAmount?: number } | mongoose.Types.ObjectId;
   promisedWindowStart?: Date;
+  promisedWindowEnd?: Date;
   priorityScore?: number;
+  createdAt?: Date;
   coordinates?: { lat: number; lng: number };
   assignmentLocked?: boolean;
   riderId?: mongoose.Types.ObjectId;
@@ -106,7 +134,8 @@ async function pickBestRiderForCluster(input: {
     companyId: input.companyId,
     branchId: input.branchId,
     deletedAt: null,
-    status: { $nin: ["offline", "inactive", "off_duty", "break"] },
+    isOnJourney: false,
+    status: { $nin: UNAVAILABLE_RIDER_STATUSES },
   }).lean();
 
   const totalValue = input.deliveries.reduce((s, d) => s + deliveryValue(d), 0);
@@ -117,27 +146,45 @@ async function pickBestRiderForCluster(input: {
 
   for (const rider of riders) {
     if (input.excludeRiderIds.has(String(rider._id))) continue;
+    if (isRiderEnRoute(rider)) continue;
+    if (!(await canRiderAcceptNewOrders(rider._id))) continue;
 
-    const load = await countActiveDeliveries(rider._id);
-    const capacity = rider.vehicleCapacityUnits ?? 20;
+    const load = await countPendingRouteLoad(rider._id);
+    const capacity = riderCapacity(rider);
     if (load + input.deliveries.length > capacity) continue;
+    if (load >= MAX_STOPS_PER_OPTIMISE_PASS) continue;
 
     const availableAt = await predictRiderReturnTime(rider);
+    if (
+      !canRiderMeetPromises({
+        riderAvailableAt: availableAt,
+        warehouseReadyAt: input.warehouseReadyAt,
+        origin: warehouse,
+        deliveries: input.deliveries,
+        existingLoad: load,
+      })
+    ) {
+      continue;
+    }
+
     const delayMin = Math.max(0, (availableAt.getTime() - input.warehouseReadyAt.getTime()) / 60000);
 
-    let score = 100 - delayMin * 2 - load * 4;
+    let score = 100 - delayMin * 2 - load * LOAD_PENALTY_PER_STOP;
+    if (rider.isOnShift) score += DISPATCH_CONFIG.onShiftBonus;
 
     if (input.clusterId) {
       const sameCluster = await Delivery.countDocuments({
         riderId: rider._id,
         clusterId: input.clusterId,
         deletedAt: null,
-        status: { $in: ["scheduled", "in_transit"] },
+        status: "scheduled",
+        warehouseStatus: { $nin: ["dispatched"] },
+        assignmentLocked: false,
       });
-      score += sameCluster * 15;
+      score += sameCluster * DISPATCH_CONFIG.sameClusterBonus;
     }
 
-    if (isHighValue && load === 0) score += 25;
+    if (isHighValue && load === 0) score += DISPATCH_CONFIG.highValueEmptyRiderBonus;
 
     score += warehouseProximityBonus(rider, warehouse);
 
@@ -173,6 +220,9 @@ export interface DeliveryPromisePrediction {
   promisedWindowStart: Date;
   promisedWindowEnd: Date;
   preparationMinutes: number;
+  warehouseReadyAt: Date;
+  travelTimeMinutes: number;
+  estimatedDeliveryAt: Date;
   estimatedRiderAvailableAt: Date;
   clusterId?: string;
   provisionalRiderId?: string;
@@ -225,6 +275,117 @@ async function countActiveDeliveries(riderId: mongoose.Types.ObjectId) {
   });
 }
 
+/** Stops on the rider's next warehouse run (not yet dispatched). */
+async function countPendingRouteLoad(riderId: mongoose.Types.ObjectId) {
+  return Delivery.countDocuments({
+    riderId,
+    deletedAt: null,
+    status: "scheduled",
+    warehouseStatus: { $nin: ["dispatched"] },
+    assignmentLocked: false,
+  });
+}
+
+function isRiderEnRoute(rider: { isOnJourney?: boolean; status?: string }) {
+  return Boolean(
+    rider.isOnJourney || (rider.status && EN_ROUTE_RIDER_STATUSES.includes(rider.status as (typeof EN_ROUTE_RIDER_STATUSES)[number]))
+  );
+}
+
+/** Riders en route must not receive new stops — orders wait in queue instead. */
+export async function canRiderAcceptNewOrders(
+  riderId: mongoose.Types.ObjectId | string
+): Promise<boolean> {
+  const rider = await Rider.findById(riderId).select("isOnJourney status").lean();
+  if (!rider || isRiderEnRoute(rider)) return false;
+
+  const inTransit = await Delivery.countDocuments({
+    riderId,
+    deletedAt: null,
+    status: "in_transit",
+  });
+  return inTransit === 0;
+}
+
+/** Bundle low-value orders onto a warehouse rider already serving this cluster. */
+async function findClusterBundleRider(input: {
+  companyId: string;
+  branchId: string;
+  clusterId: string;
+  excludeDeliveryId?: string;
+}): Promise<mongoose.Types.ObjectId | null> {
+  const candidates = await Delivery.find({
+    companyId: input.companyId,
+    branchId: input.branchId,
+    clusterId: input.clusterId,
+    deletedAt: null,
+    status: "scheduled",
+    warehouseStatus: { $nin: ["dispatched"] },
+    assignmentLocked: false,
+    riderId: { $exists: true },
+    ...(input.excludeDeliveryId ? { _id: { $ne: input.excludeDeliveryId } } : {}),
+  })
+    .select("riderId")
+    .lean();
+
+  const seen = new Set<string>();
+  for (const c of candidates) {
+    if (!c.riderId) continue;
+    const riderId = String(c.riderId);
+    if (seen.has(riderId)) continue;
+    seen.add(riderId);
+    if (await canRiderAcceptNewOrders(c.riderId)) {
+      return c.riderId as mongoose.Types.ObjectId;
+    }
+  }
+  return null;
+}
+
+async function refreshDeliveryPromiseEstimates(
+  companyId: string,
+  branchId: string,
+  deliveryIds?: string[]
+) {
+  const filter: Record<string, unknown> = {
+    companyId,
+    branchId,
+    deletedAt: null,
+    status: "pending_assignment",
+    warehouseStatus: { $nin: ["dispatched"] },
+  };
+  if (deliveryIds?.length) filter._id = { $in: deliveryIds };
+
+  const queued = await Delivery.find(filter).populate("saleId", "totalAmount quantity").lean();
+
+  for (const d of queued) {
+    const sale = d.saleId as { totalAmount?: number; quantity?: number } | null;
+    const prediction = await predictDeliveryPromise({
+      companyId,
+      branchId,
+      coordinates: d.coordinates,
+      totalAmount: sale?.totalAmount ?? 0,
+      quantity: sale?.quantity ?? 1,
+      orderSource: d.orderSource,
+    });
+
+    await Delivery.updateOne(
+      { _id: d._id },
+      {
+        promisedWindowStart: prediction.promisedWindowStart,
+        promisedWindowEnd: prediction.promisedWindowEnd,
+        timeSlotStart: prediction.promisedWindowStart,
+        timeSlotEnd: prediction.promisedWindowEnd,
+        scheduledDate: prediction.promisedWindowStart,
+        provisionalRiderId: prediction.provisionalRiderId,
+        preparationMinutes: prediction.preparationMinutes,
+        warehouseReadyAt: prediction.warehouseReadyAt,
+        travelTimeMinutes: prediction.travelTimeMinutes,
+        estimatedArrival: prediction.estimatedDeliveryAt,
+      }
+    );
+  }
+}
+
 async function predictRiderReturnTime(rider: {
   _id: mongoose.Types.ObjectId;
   predictedReturnAt?: Date;
@@ -252,7 +413,7 @@ async function predictRiderReturnTime(rider: {
   return new Date();
 }
 
-/** Predict earliest achievable 45-minute delivery window before order confirmation */
+/** Predict earliest achievable delivery window before order confirmation */
 export async function predictDeliveryPromise(input: {
   companyId: string;
   branchId: string;
@@ -285,7 +446,8 @@ export async function predictDeliveryPromise(input: {
     companyId: input.companyId,
     branchId: input.branchId,
     deletedAt: null,
-    status: { $in: ["available", "active", "on_delivery", "returning_to_warehouse", "loading"] },
+    isOnJourney: false,
+    status: { $nin: UNAVAILABLE_RIDER_STATUSES },
   }).lean();
 
   const warehouse = await getBranchWarehousePoint(input.branchId);
@@ -294,15 +456,19 @@ export async function predictDeliveryPromise(input: {
   let earliestRiderAt = new Date(now.getTime() + 2 * 60 * 60000);
 
   for (const rider of riders) {
-    const load = await countActiveDeliveries(rider._id);
-    const capacity = rider.vehicleCapacityUnits ?? 20;
+    if (isRiderEnRoute(rider)) continue;
+    if (!(await canRiderAcceptNewOrders(rider._id))) continue;
+
+    const load = await countPendingRouteLoad(rider._id);
+    const capacity = riderCapacity(rider);
     if (load >= capacity) continue;
 
     const availableAt = await predictRiderReturnTime(rider);
     const riderReady = availableAt > warehouseReadyAt ? availableAt : warehouseReadyAt;
 
     const delayMin = Math.max(0, (riderReady.getTime() - warehouseReadyAt.getTime()) / 60000);
-    let score = 100 - delayMin * 2 - load * 4 + warehouseProximityBonus(rider, warehouse);
+    let score = 100 - delayMin * 2 - load * LOAD_PENALTY_PER_STOP + warehouseProximityBonus(rider, warehouse);
+    if (rider.isOnShift) score += DISPATCH_CONFIG.onShiftBonus;
 
     if (score > bestScore) {
       bestScore = score;
@@ -312,7 +478,22 @@ export async function predictDeliveryPromise(input: {
   }
 
   if (!bestRider) {
-    earliestRiderAt = new Date(warehouseReadyAt.getTime() + 60 * 60000);
+    const returning = await Rider.find({
+      companyId: input.companyId,
+      branchId: input.branchId,
+      deletedAt: null,
+      status: "returning_to_warehouse",
+    })
+      .sort({ predictedReturnAt: 1 })
+      .lean();
+
+    if (returning[0]?.predictedReturnAt) {
+      earliestRiderAt = new Date(
+        Math.max(returning[0].predictedReturnAt.getTime(), warehouseReadyAt.getTime())
+      );
+    } else {
+      earliestRiderAt = new Date(warehouseReadyAt.getTime() + 60 * 60000);
+    }
   }
 
   let promisedWindowStart = new Date(
@@ -330,6 +511,16 @@ export async function predictDeliveryPromise(input: {
     if (promisedWindowStart < warehouseReadyAt) promisedWindowStart = warehouseReadyAt;
   }
 
+  const travelTimeMinutes = input.coordinates?.lat
+    ? estimateTravelMinutes(warehouse, input.coordinates)
+    : 0;
+
+  if (travelTimeMinutes > 0) {
+    promisedWindowStart = new Date(promisedWindowStart.getTime() + travelTimeMinutes * 60000);
+  }
+
+  const estimatedDeliveryAt = new Date(promisedWindowStart.getTime());
+
   const promisedWindowEnd = new Date(
     promisedWindowStart.getTime() + PROMISE_WINDOW_MINUTES * 60000
   );
@@ -344,6 +535,9 @@ export async function predictDeliveryPromise(input: {
     promisedWindowStart,
     promisedWindowEnd,
     preparationMinutes: prepMin,
+    warehouseReadyAt,
+    travelTimeMinutes,
+    estimatedDeliveryAt,
     estimatedRiderAvailableAt: earliestRiderAt,
     clusterId: cluster?._id ? String(cluster._id) : undefined,
     provisionalRiderId: bestRider?._id ? String(bestRider._id) : undefined,
@@ -391,22 +585,19 @@ export async function provisionalAssignRider(deliveryId: string) {
 
   const value = deliveryValue(lean);
   if (value < LOW_VALUE_THRESHOLD && lean.clusterId) {
-    const existingRun = await Delivery.findOne({
-      companyId: lean.companyId,
-      branchId: lean.branchId,
-      clusterId: lean.clusterId,
-      deletedAt: null,
-      status: { $in: ["scheduled", "in_transit"] },
-      riderId: { $exists: true },
-      _id: { $ne: lean._id },
-    }).lean();
+    const bundleRiderId = await findClusterBundleRider({
+      companyId: String(lean.companyId),
+      branchId: String(lean.branchId),
+      clusterId: String(lean.clusterId),
+      excludeDeliveryId: String(lean._id),
+    });
 
-    if (existingRun?.riderId) {
+    if (bundleRiderId) {
       await Delivery.updateOne(
         { _id: deliveryId },
         {
-          riderId: existingRun.riderId,
-          provisionalRiderId: existingRun.riderId,
+          riderId: bundleRiderId,
+          provisionalRiderId: bundleRiderId,
           status: "scheduled",
         }
       );
@@ -435,6 +626,20 @@ export async function provisionalAssignRider(deliveryId: string) {
         provisionalRiderId: rider._id,
         status: "scheduled",
       }
+    );
+  } else {
+    await Delivery.updateOne(
+      { _id: deliveryId },
+      {
+        status: "pending_assignment",
+        riderId: undefined,
+        provisionalRiderId: undefined,
+      }
+    );
+    await refreshDeliveryPromiseEstimates(
+      String(lean.companyId),
+      String(lean.branchId),
+      [String(lean._id)]
     );
   }
 
@@ -474,7 +679,154 @@ export function protectCurrentDestination(
   }));
 }
 
-/** Cluster-first fleet plan — one rider per cluster run where possible */
+/** Build or extend a warehouse planning run — never touches en-route riders. */
+async function assignDeliveriesToRiderRun(input: {
+  companyId: string;
+  branchId: string;
+  riderId: mongoose.Types.ObjectId;
+  deliveries: DeliveryLean[];
+  origin: { lat: number; lng: number };
+  now: Date;
+  clusterId?: string;
+}) {
+  if (!(await canRiderAcceptNewOrders(input.riderId))) return null;
+
+  for (const d of input.deliveries) {
+    await Delivery.updateOne(
+      { _id: d._id },
+      {
+        riderId: input.riderId,
+        provisionalRiderId: input.riderId,
+        status: "scheduled",
+      }
+    );
+  }
+
+  const allForRider = await Delivery.find({
+    riderId: input.riderId,
+    deletedAt: null,
+    status: "scheduled",
+    warehouseStatus: { $nin: ["dispatched"] },
+    assignmentLocked: false,
+  })
+    .populate("saleId", "totalAmount")
+    .lean();
+
+  const merged = allForRider as DeliveryLean[];
+  const withCoords = merged.filter((d) => d.coordinates?.lat);
+  if (!withCoords.length) return null;
+
+  const stops = withCoords.map((d) => ({
+    id: String(d._id),
+    lat: d.coordinates!.lat,
+    lng: d.coordinates!.lng,
+  }));
+
+  const optimized = await optimizeRoute(input.origin, stops);
+  const totalValue = merged.reduce((s, d) => s + deliveryValue(d), 0);
+  const kpis = computeDeliveryKpis(
+    merged.map((d) => ({ totalAmount: deliveryValue(d) })),
+    optimized.totalDistanceMeters
+  );
+
+  const warehouseReadyAt = computeWarehouseReadyAt(input.now);
+  const departAt = input.now > warehouseReadyAt ? input.now : warehouseReadyAt;
+  const stopEtas = computeRouteStopEtas({
+    origin: input.origin,
+    stops: optimized.stops,
+    departAt,
+    totalDurationSeconds: optimized.totalDurationSeconds,
+  });
+
+  const returnEta = new Date(
+    input.now.getTime() +
+      optimized.totalDurationSeconds * 1000 +
+      merged.length * AVG_DELIVERY_STOP_MINUTES * 60000 +
+      20 * 60000
+  );
+
+  const existingRun = await DeliveryRun.findOne({
+    riderId: input.riderId,
+    status: { $in: ["planning", "loading"] },
+    assignmentLocked: false,
+  }).sort({ createdAt: -1 });
+
+  const clusterIds = new Set((existingRun?.clusterIds ?? []).map(String));
+  if (input.clusterId) clusterIds.add(input.clusterId);
+
+  let run = existingRun;
+  if (run) {
+    run.stops = optimized.stops.map((s, i) => ({
+      deliveryId: new mongoose.Types.ObjectId(s.id),
+      order: i + 1,
+      lat: s.lat,
+      lng: s.lng,
+    }));
+    run.clusterIds = [...clusterIds].map((id) => new mongoose.Types.ObjectId(id));
+    run.totalDistanceMeters = optimized.totalDistanceMeters;
+    run.totalDurationSeconds = optimized.totalDurationSeconds;
+    run.deliveriesPerKm = kpis.deliveriesPerKm;
+    run.grossMarginPerKm = kpis.grossMarginPerKm;
+    run.vehicleCapacityUsed = merged.length;
+    await run.save();
+  } else {
+    const clusterKey = input.clusterId ?? "mixed";
+    const runNumber = `RUN-${new Date().getFullYear()}-${clusterKey.slice(-4)}-${Date.now()}`;
+    run = await DeliveryRun.create({
+      companyId: input.companyId,
+      branchId: input.branchId,
+      riderId: input.riderId,
+      runNumber,
+      status: "planning",
+      scheduledDate: input.now,
+      clusterIds: [...clusterIds].map((id) => new mongoose.Types.ObjectId(id)),
+      stops: optimized.stops.map((s, i) => ({
+        deliveryId: s.id,
+        order: i + 1,
+        lat: s.lat,
+        lng: s.lng,
+      })),
+      totalDistanceMeters: optimized.totalDistanceMeters,
+      totalDurationSeconds: optimized.totalDurationSeconds,
+      deliveriesPerKm: kpis.deliveriesPerKm,
+      grossMarginPerKm: kpis.grossMarginPerKm,
+      vehicleCapacityUsed: merged.length,
+    });
+  }
+
+  for (let i = 0; i < optimized.stops.length; i++) {
+    const stopId = optimized.stops[i].id;
+    const eta = stopEtas.get(stopId);
+    await Delivery.updateOne(
+      { _id: stopId },
+      {
+        routeOrder: i + 1,
+        runId: run!._id,
+        status: "scheduled",
+        warehouseReadyAt,
+        ...(eta
+          ? {
+              estimatedArrival: eta.estimatedArrival,
+              travelTimeMinutes: eta.travelTimeMinutes,
+            }
+          : {}),
+      }
+    );
+  }
+
+  await Rider.updateOne(
+    { _id: input.riderId },
+    { currentRunId: run!._id, predictedReturnAt: returnEta }
+  );
+
+  return {
+    run,
+    stops: optimized.stops.length,
+    totalValue,
+  };
+}
+
+/** Cluster-first fleet plan — priority-scored, ETA-feasible, load-balanced */
 export async function optimiseFleetPlan(input: {
   companyId: string;
   branchId: string;
@@ -505,7 +857,14 @@ export async function optimiseFleetPlan(input: {
     byCluster.set(key, list);
   }
 
+  for (const [, list] of byCluster) {
+    list.sort((a, b) => compareDeliveriesByDispatchPriority(a, b));
+  }
+
   const clusterEntries = [...byCluster.entries()].sort((a, b) => {
+    const priorityA = a[1].reduce((s, d) => s + (d.priorityScore ?? 0), 0);
+    const priorityB = b[1].reduce((s, d) => s + (d.priorityScore ?? 0), 0);
+    if (priorityB !== priorityA) return priorityB - priorityA;
     const valueA = a[1].reduce((s, d) => s + deliveryValue(d), 0);
     const valueB = b[1].reduce((s, d) => s + deliveryValue(d), 0);
     if (valueB !== valueA) return valueB - valueA;
@@ -513,6 +872,7 @@ export async function optimiseFleetPlan(input: {
   });
 
   const usedRiders = new Set<string>();
+  const riderBatchStops = new Map<string, number>();
   const results: {
     riderId: string;
     runId: string;
@@ -530,25 +890,38 @@ export async function optimiseFleetPlan(input: {
       clusterDeliveries.length === 1;
 
     if (lowValueOnly && clusterId) {
-      const existingRun = await Delivery.findOne({
+      const bundleRiderId = await findClusterBundleRider({
         companyId: input.companyId,
         branchId: input.branchId,
         clusterId,
-        deletedAt: null,
-        status: { $in: ["scheduled", "in_transit"] },
-        riderId: { $exists: true },
-      }).lean();
+      });
 
-      if (existingRun?.riderId) {
-        const riderId = String(existingRun.riderId);
-        for (const d of clusterDeliveries) {
-          await Delivery.updateOne(
-            { _id: d._id },
-            { riderId, provisionalRiderId: riderId, status: "scheduled" }
-          );
+      if (bundleRiderId) {
+        const riderId = String(bundleRiderId);
+        const batchLoad = riderBatchStops.get(riderId) ?? (await countPendingRouteLoad(bundleRiderId));
+        if (batchLoad < MAX_STOPS_PER_OPTIMISE_PASS) {
+          const runResult = await assignDeliveriesToRiderRun({
+            companyId: input.companyId,
+            branchId: input.branchId,
+            riderId: bundleRiderId,
+            deliveries: clusterDeliveries,
+            origin,
+            now,
+            clusterId,
+          });
+          if (runResult) {
+            usedRiders.add(riderId);
+            riderBatchStops.set(riderId, batchLoad + clusterDeliveries.length);
+            results.push({
+              riderId,
+              runId: String(runResult.run._id),
+              clusterId: clusterKey,
+              stops: runResult.stops,
+              totalValue: runResult.totalValue,
+            });
+            continue;
+          }
         }
-        usedRiders.add(riderId);
-        continue;
       }
     }
 
@@ -561,93 +934,343 @@ export async function optimiseFleetPlan(input: {
       warehouseReadyAt,
     });
 
-    if (!rider) continue;
-
-    const riderId = rider._id;
-    usedRiders.add(String(riderId));
-
-    for (const d of clusterDeliveries) {
-      await Delivery.updateOne(
-        { _id: d._id },
-        { riderId, provisionalRiderId: riderId, status: "scheduled" }
-      );
-    }
-
-    const withCoords = clusterDeliveries.filter((d) => d.coordinates?.lat);
-    if (!withCoords.length) {
-      results.push({
-        riderId: String(riderId),
-        runId: "",
-        clusterId: clusterKey,
-        stops: clusterDeliveries.length,
-        totalValue,
-      });
+    if (!rider) {
+      for (const d of clusterDeliveries) {
+        await Delivery.updateOne(
+          { _id: d._id },
+          {
+            status: "pending_assignment",
+            riderId: undefined,
+            provisionalRiderId: undefined,
+            runId: undefined,
+            routeOrder: undefined,
+          }
+        );
+      }
       continue;
     }
 
-    const stops = withCoords.map((d) => ({
-      id: String(d._id),
-      lat: d.coordinates!.lat,
-      lng: d.coordinates!.lng,
-    }));
+    const riderId = rider._id;
+    const batchLoad = riderBatchStops.get(String(riderId)) ?? (await countPendingRouteLoad(riderId));
+    if (batchLoad + clusterDeliveries.length > MAX_STOPS_PER_OPTIMISE_PASS) {
+      for (const d of clusterDeliveries) {
+        await Delivery.updateOne(
+          { _id: d._id },
+          {
+            status: "pending_assignment",
+            riderId: undefined,
+            provisionalRiderId: undefined,
+            runId: undefined,
+            routeOrder: undefined,
+          }
+        );
+      }
+      continue;
+    }
 
-    const optimized = await optimizeRoute(origin, stops);
-    const kpis = computeDeliveryKpis(
-      clusterDeliveries.map((d) => ({ totalAmount: deliveryValue(d) })),
-      optimized.totalDistanceMeters
-    );
+    usedRiders.add(String(riderId));
+    riderBatchStops.set(String(riderId), batchLoad + clusterDeliveries.length);
 
-    const returnEta = new Date(
-      now.getTime() +
-        optimized.totalDurationSeconds * 1000 +
-        clusterDeliveries.length * AVG_DELIVERY_STOP_MINUTES * 60000 +
-        20 * 60000
-    );
-
-    const runNumber = `RUN-${new Date().getFullYear()}-${clusterKey.slice(-4)}-${Date.now()}`;
-    const run = await DeliveryRun.create({
+    const runResult = await assignDeliveriesToRiderRun({
       companyId: input.companyId,
       branchId: input.branchId,
       riderId,
-      runNumber,
-      status: "planning",
-      scheduledDate: now,
-      clusterIds: clusterId ? [clusterId] : [],
-      stops: optimized.stops.map((s, i) => ({
-        deliveryId: s.id,
-        order: i + 1,
-        lat: s.lat,
-        lng: s.lng,
-      })),
-      totalDistanceMeters: optimized.totalDistanceMeters,
-      totalDurationSeconds: optimized.totalDurationSeconds,
-      deliveriesPerKm: kpis.deliveriesPerKm,
-      grossMarginPerKm: kpis.grossMarginPerKm,
-      vehicleCapacityUsed: clusterDeliveries.length,
+      deliveries: clusterDeliveries,
+      origin,
+      now,
+      clusterId,
     });
 
-    for (let i = 0; i < optimized.stops.length; i++) {
-      await Delivery.updateOne(
-        { _id: optimized.stops[i].id },
-        { routeOrder: i + 1, runId: run._id, status: "scheduled" }
-      );
+    if (runResult) {
+      results.push({
+        riderId: String(riderId),
+        runId: String(runResult.run._id),
+        clusterId: clusterKey,
+        stops: runResult.stops,
+        totalValue: runResult.totalValue,
+      });
     }
-
-    await Rider.updateOne(
-      { _id: riderId },
-      { currentRunId: run._id, predictedReturnAt: returnEta }
-    );
-
-    results.push({
-      riderId: String(riderId),
-      runId: String(run._id),
-      clusterId: clusterKey,
-      stops: optimized.stops.length,
-      totalValue,
-    });
   }
 
+  await assignGreedyByPriority({
+    companyId: input.companyId,
+    branchId: input.branchId,
+    origin,
+    now,
+    warehouseReadyAt,
+    riderBatchStops,
+    results,
+  });
+
+  await refreshDeliveryPromiseEstimates(input.companyId, input.branchId);
+
   return { trigger: input.trigger, optimised: results };
+}
+
+/** Second pass: assign remaining pending orders one-by-one by priority */
+async function assignGreedyByPriority(input: {
+  companyId: string;
+  branchId: string;
+  origin: { lat: number; lng: number };
+  now: Date;
+  warehouseReadyAt: Date;
+  riderBatchStops: Map<string, number>;
+  results: {
+    riderId: string;
+    runId: string;
+    clusterId: string;
+    stops: number;
+    totalValue: number;
+  }[];
+}) {
+  const pending = await Delivery.find({
+    companyId: input.companyId,
+    branchId: input.branchId,
+    deletedAt: null,
+    status: "pending_assignment",
+    assignmentLocked: false,
+    currentDestinationLocked: false,
+    warehouseStatus: { $nin: ["dispatched"] },
+  })
+    .populate("saleId", "totalAmount")
+    .lean();
+
+  const sorted = (pending as DeliveryLean[]).sort((a, b) =>
+    compareDeliveriesByDispatchPriority(a, b)
+  );
+
+  for (const d of sorted) {
+    const clusterId = d.clusterId ? String(d.clusterId) : undefined;
+    const rider = await pickBestRiderForCluster({
+      companyId: input.companyId,
+      branchId: input.branchId,
+      clusterId,
+      deliveries: [d],
+      excludeRiderIds: new Set(),
+      warehouseReadyAt: input.warehouseReadyAt,
+    });
+    if (!rider) continue;
+
+    const riderId = String(rider._id);
+    const batchLoad =
+      input.riderBatchStops.get(riderId) ?? (await countPendingRouteLoad(rider._id));
+    if (batchLoad >= MAX_STOPS_PER_OPTIMISE_PASS) continue;
+
+    const runResult = await assignDeliveriesToRiderRun({
+      companyId: input.companyId,
+      branchId: input.branchId,
+      riderId: rider._id,
+      deliveries: [d],
+      origin: input.origin,
+      now: input.now,
+      clusterId,
+    });
+
+    if (runResult) {
+      input.riderBatchStops.set(riderId, batchLoad + 1);
+      input.results.push({
+        riderId,
+        runId: String(runResult.run._id),
+        clusterId: clusterId ?? "unclustered",
+        stops: runResult.stops,
+        totalValue: runResult.totalValue,
+      });
+    }
+  }
+}
+
+async function autoAssignIdleRidersAtWarehouse(companyId: string, branchId: string) {
+  const riders = await Rider.find({
+    companyId,
+    branchId,
+    deletedAt: null,
+    isOnShift: true,
+    isOnJourney: false,
+    status: { $nin: ["offline", "inactive", "off_duty", "break", "on_delivery", "loading"] },
+  })
+    .select("_id")
+    .lean();
+
+  let assigned = 0;
+  for (const rider of riders) {
+    if (!(await canRiderAcceptNewOrders(rider._id))) continue;
+    const result = await assignNextRouteToRider(rider._id);
+    assigned += result.assigned;
+  }
+
+  return { ridersChecked: riders.length, ordersAssigned: assigned };
+}
+
+function branchDispatchKey(companyId: string, branchId: string) {
+  return `${companyId}:${branchId}`;
+}
+
+/** Full automated cycle: prep advance → re-score → idle riders → fleet optimise */
+export async function runDispatchCycle(input: {
+  companyId: string;
+  branchId: string;
+  trigger: string;
+}) {
+  await autoAdvanceWarehousePrep(input.companyId, input.branchId);
+  await refreshQueuePriorities(input.companyId, input.branchId);
+  await autoAssignIdleRidersAtWarehouse(input.companyId, input.branchId);
+  return optimiseFleetPlan(input);
+}
+
+/** Debounced optimise — coalesces burst events into one cycle */
+export function scheduleFleetOptimise(input: {
+  companyId: string;
+  branchId: string;
+  trigger: string;
+}) {
+  const key = branchDispatchKey(input.companyId, input.branchId);
+  const existing = pendingOptimise.get(key);
+  if (existing) clearTimeout(existing);
+
+  pendingOptimise.set(
+    key,
+    setTimeout(() => {
+      pendingOptimise.delete(key);
+      void runDispatchCycle(input).catch((err) => {
+        console.error("[dispatch] scheduled optimise failed", err);
+      });
+    }, DISPATCH_CONFIG.optimiseDebounceMs)
+  );
+}
+
+/** Periodic background optimise for branches with riders on shift */
+export function ensureBackgroundDispatchLoop() {
+  if (backgroundDispatchStarted) return;
+  backgroundDispatchStarted = true;
+
+  setInterval(() => {
+    void (async () => {
+      const activeBranches = await Rider.distinct("branchId", {
+        deletedAt: null,
+        isOnShift: true,
+      });
+
+      for (const branchId of activeBranches) {
+        const rider = await Rider.findOne({ branchId, isOnShift: true })
+          .select("companyId")
+          .lean();
+        if (!rider?.companyId) continue;
+
+        const companyId = String(rider.companyId);
+        const key = branchDispatchKey(companyId, String(branchId));
+        if (pendingOptimise.has(key)) continue;
+
+        void runDispatchCycle({
+          companyId,
+          branchId: String(branchId),
+          trigger: "background",
+        }).catch(() => {});
+      }
+    })();
+  }, DISPATCH_CONFIG.backgroundOptimiseIntervalMs);
+}
+
+/** Mark the rider's active run complete when back at warehouse with no pending stops. */
+export async function completeRiderRun(riderId: mongoose.Types.ObjectId | string) {
+  const rider = await Rider.findById(riderId);
+  if (!rider) return null;
+
+  const now = new Date();
+  await DeliveryRun.updateMany(
+    {
+      riderId: rider._id,
+      status: { $in: ["active", "returning"] },
+    },
+    { status: "completed", endedAt: now }
+  );
+
+  rider.isOnJourney = false;
+  rider.status = "available";
+  rider.predictedReturnAt = undefined;
+  await rider.save();
+  return rider;
+}
+
+export async function countUndeliveredStops(riderId: mongoose.Types.ObjectId | string) {
+  return Delivery.countDocuments({
+    riderId,
+    deletedAt: null,
+    status: { $in: ["scheduled", "in_transit"] },
+  });
+}
+
+/** Assign the next queued batch to a rider waiting at the warehouse. */
+export async function assignNextRouteToRider(riderId: mongoose.Types.ObjectId | string) {
+  const rider = await Rider.findById(riderId);
+  if (!rider || !(await canRiderAcceptNewOrders(riderId))) {
+    return { assigned: 0 };
+  }
+
+  const branch = await Branch.findById(rider.branchId).lean();
+  const origin = branch?.gpsCoordinates ?? { lat: 23.588, lng: 58.3829 };
+  const now = new Date();
+
+  const queued = await Delivery.find({
+    companyId: rider.companyId,
+    branchId: rider.branchId,
+    deletedAt: null,
+    status: "pending_assignment",
+    assignmentLocked: false,
+    currentDestinationLocked: false,
+    warehouseStatus: { $nin: ["dispatched"] },
+  })
+    .populate("saleId", "totalAmount")
+    .sort({ priorityScore: -1, promisedWindowStart: 1, createdAt: 1 })
+    .lean();
+
+  const capacity = riderCapacity(rider);
+  const currentLoad = await countPendingRouteLoad(rider._id);
+  const slots = Math.min(MAX_STOPS_PER_OPTIMISE_PASS - currentLoad, capacity - currentLoad);
+  if (slots <= 0 || !queued.length) return { assigned: 0 };
+
+  const toAssign = queued.slice(0, slots) as DeliveryLean[];
+  const runResult = await assignDeliveriesToRiderRun({
+    companyId: String(rider.companyId),
+    branchId: String(rider.branchId),
+    riderId: rider._id,
+    deliveries: toAssign,
+    origin,
+    now,
+  });
+
+  return {
+    assigned: toAssign.length,
+    runId: runResult?.run ? String(runResult.run._id) : undefined,
+    runNumber: runResult?.run?.runNumber,
+  };
+}
+
+/**
+ * Rider finished all stops and is back at warehouse — complete prior run and plan the next one.
+ */
+export async function onRiderBackAtWarehouse(riderId: mongoose.Types.ObjectId | string) {
+  const rider = await Rider.findById(riderId);
+  if (!rider) return { completed: false, assigned: 0 };
+
+  const remaining = await countUndeliveredStops(riderId);
+  if (remaining > 0) {
+    rider.status = "returning_to_warehouse";
+    rider.isOnJourney = false;
+    rider.predictedReturnAt = new Date(Date.now() + 20 * 60000);
+    await rider.save();
+    return { completed: false, assigned: 0, remainingStops: remaining };
+  }
+
+  await completeRiderRun(riderId);
+  const next = await assignNextRouteToRider(riderId);
+
+  void scheduleFleetOptimise({
+    companyId: String(rider.companyId),
+    branchId: String(rider.branchId),
+    trigger: "rider_back_at_warehouse",
+  });
+
+  return { completed: true, ...next };
 }
 
 export async function advanceWarehouseStatus(
@@ -673,7 +1296,7 @@ export async function advanceWarehouseStatus(
   await delivery.save();
 
   if (status !== "dispatched") {
-    void optimiseFleetPlan({
+    void scheduleFleetOptimise({
       companyId: String(delivery.companyId),
       branchId: String(delivery.branchId),
       trigger: `warehouse_${status}`,
@@ -682,7 +1305,7 @@ export async function advanceWarehouseStatus(
 
   if (status === "dispatched") {
     await lockDeliveryAssignment(deliveryId);
-    void optimiseFleetPlan({
+    void scheduleFleetOptimise({
       companyId: String(delivery.companyId),
       branchId: String(delivery.branchId),
       trigger: "dispatch_departed",
@@ -744,7 +1367,7 @@ export async function confirmDeliveryPromise(
   await delivery.save();
 
   await provisionalAssignRider(deliveryId);
-  void optimiseFleetPlan({
+  void scheduleFleetOptimise({
     companyId: String(delivery.companyId),
     branchId: String(delivery.branchId),
     trigger: "promise_confirmed",
@@ -778,7 +1401,7 @@ export async function handleRiderBreakdown(riderId: string) {
     await d.save();
   }
 
-  const result = await optimiseFleetPlan({
+  const result = await runDispatchCycle({
     companyId: String(rider.companyId),
     branchId: String(rider.branchId),
     trigger: "rider_breakdown",
@@ -798,7 +1421,7 @@ export async function handleCustomerUnavailable(deliveryId: string) {
 
   const windows = await offerRescheduleWindows(deliveryId);
 
-  void optimiseFleetPlan({
+  void scheduleFleetOptimise({
     companyId: String(delivery.companyId),
     branchId: String(delivery.branchId),
     trigger: "customer_unavailable",

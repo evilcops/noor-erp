@@ -8,7 +8,7 @@ const purchaseItemSchema = z.object({
 });
 
 export const createPurchaseSchema = z.object({
-  companyId: z.string().min(1),
+  companyId: z.string().min(1).optional(),
   branchId: z.string().min(1),
   supplierId: z.string().min(1),
   items: z.array(purchaseItemSchema).min(1),

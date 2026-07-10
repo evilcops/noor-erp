@@ -58,22 +58,29 @@ export interface RiderRoutePoint {
   order: number;
   deliveryId?: string;
   label?: string;
+  deliveryStatus?: string;
+}
+
+export interface RiderRouteSummary {
+  runId?: string;
+  runNumber?: string;
+  runStatus?: "planning" | "loading" | "active" | "completed";
+  completedAt?: string;
+  points: RiderRoutePoint[];
+  pathGeometry: { lat: number; lng: number }[];
+  outboundDistanceKm: number;
+  returnDistanceKm: number;
+  roundTripDistanceKm: number;
+  totalDurationMin: number;
+  roundTripCost: number;
+  costPerKm: number;
+  stopCount: number;
+  deliveredCount?: number;
 }
 
 export interface RiderLocationSnapshot extends LiveRider {
-  route?: {
-    points: RiderRoutePoint[];
-    /** Road-following geometry from OSRM (not straight lines) */
-    pathGeometry: { lat: number; lng: number }[];
-    outboundDistanceKm: number;
-    returnDistanceKm: number;
-    roundTripDistanceKm: number;
-    totalDurationMin: number;
-    /** Round trip cost at costPerKm × roundTripDistanceKm */
-    roundTripCost: number;
-    costPerKm: number;
-    stopCount: number;
-  } | null;
+  route?: RiderRouteSummary | null;
+  previousRoute?: RiderRouteSummary | null;
   warehouse?: { lat: number; lng: number };
 }
 

@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { useAuth, useBranch } from "@/hooks";
+import { useAuth, useTenantIds } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { customerApi } from "@/lib/api/customers";
 import { geocodeAddress } from "@/lib/geocoding-client";
@@ -63,7 +63,6 @@ function formatAmount(value?: number) {
 
 export function CustomersPage() {
   const { user } = useAuth();
-  const { branches } = useBranch();
   const { can } = usePermissions();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
@@ -79,7 +78,7 @@ export function CustomersPage() {
   const [saleDetailOpen, setSaleDetailOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
 
-  const companyId = user?.companyId ?? branches[0]?.companyId ?? "";
+  const { companyId, branchId } = useTenantIds();
 
   const parsedLat = form.lat ? Number(form.lat) : null;
   const parsedLng = form.lng ? Number(form.lng) : null;
@@ -226,10 +225,15 @@ export function CustomersPage() {
     parsedLat != null && parsedLng != null && !Number.isNaN(parsedLat) && !Number.isNaN(parsedLng);
 
   const { data: locationInfo, isFetching: resolvingLocation } = useQuery({
-    queryKey: ["resolve-cluster", companyId, form.lat, form.lng],
+    queryKey: ["resolve-cluster", companyId, branchId, form.lat, form.lng],
     queryFn: () =>
-      customerApi.resolveCluster({ companyId, lat: Number(form.lat), lng: Number(form.lng) }),
-    enabled: formOpen && !!companyId && hasPin,
+      customerApi.resolveCluster({
+        companyId: companyId || undefined,
+        branchId: branchId || undefined,
+        lat: Number(form.lat),
+        lng: Number(form.lng),
+      }),
+    enabled: formOpen && (!!companyId || !!branchId) && hasPin,
   });
 
   const { data: detail, isLoading: detailLoading } = useQuery({

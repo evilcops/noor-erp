@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import type { Request, Response } from "express";
 import { BusinessDocument } from "../models/BusinessDocument.model";
-import { buildTenantFilter } from "../services/permission.service";
+import { buildTenantFilter, resolveRequestCompanyId } from "../services/permission.service";
 import { buildMeta, parsePagination, sendSuccess } from "../utils/apiResponse";
 import { AppError } from "../utils/AppError";
 
@@ -47,11 +47,7 @@ export async function getBusinessDocument(req: Request, res: Response) {
 export async function createBusinessDocument(req: Request, res: Response) {
   const { type, customTypeName, startDate, expiryDate, notes, companyId: bodyCompanyId } = req.body;
 
-  // Use the user's own companyId first; fall back to body for super-admins managing multiple companies
-  const companyId = req.user!.companyId ?? bodyCompanyId;
-  if (!companyId) {
-    throw new AppError("VALIDATION_ERROR", "companyId is required — assign a company to this user account", 400);
-  }
+  const companyId = await resolveRequestCompanyId(req.user!, bodyCompanyId);
 
   if (type === "custom" && !customTypeName?.trim()) {
     throw new AppError("VALIDATION_ERROR", "customTypeName is required for custom documents", 400);

@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
 import { Select } from "@/components/ui/Select";
-import { useAuth } from "@/hooks";
+import { useAuth, useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { supplierApi } from "@/lib/api/suppliers";
 import { PurchaseOrderDetailModal } from "@/components/features/orders/PurchaseOrderDetailModal";
@@ -52,6 +52,7 @@ function formatAmount(value?: number) {
 
 export function SuppliersPage() {
   const { user } = useAuth();
+  const { branches } = useBranch();
   const { can } = usePermissions();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
@@ -65,7 +66,7 @@ export function SuppliersPage() {
   const [purchaseDetailOpen, setPurchaseDetailOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
 
-  const companyId = user?.companyId ?? "";
+  const companyId = user?.companyId ?? branches[0]?.companyId ?? "";
 
   const { data, isLoading } = useQuery({
     queryKey: ["suppliers", page, search],
@@ -81,8 +82,11 @@ export function SuppliersPage() {
 
   const saveMut = useMutation({
     mutationFn: () => {
+      if (!selected && !companyId) {
+        throw new Error("No company linked to your account. Log out and back in, or select a branch.");
+      }
       const payload = {
-        companyId,
+        ...(companyId ? { companyId } : {}),
         name: form.name,
         contactPerson: form.contactPerson || undefined,
         phone: form.phone || undefined,
@@ -303,7 +307,12 @@ export function SuppliersPage() {
         </div>
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setFormOpen(false)}>Cancel</Button>
-          <Button disabled={!form.name || saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button>
+          <Button
+            disabled={!form.name || saveMut.isPending || (!selected && !companyId)}
+            onClick={() => saveMut.mutate()}
+          >
+            Save
+          </Button>
         </div>
       </Modal>
 

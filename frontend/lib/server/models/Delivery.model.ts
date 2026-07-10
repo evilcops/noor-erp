@@ -58,6 +58,8 @@ export interface IDelivery extends Document {
   promisedWindowEnd?: Date;
   promiseAcceptedAt?: Date;
   preparationMinutes?: number;
+  warehouseReadyAt?: Date;
+  travelTimeMinutes?: number;
   scheduledDate?: Date;
   timeSlotStart?: Date;
   timeSlotEnd?: Date;
@@ -152,6 +154,8 @@ const deliverySchema = new Schema<IDelivery>(
     promisedWindowEnd: Date,
     promiseAcceptedAt: Date,
     preparationMinutes: Number,
+    warehouseReadyAt: Date,
+    travelTimeMinutes: Number,
     scheduledDate: Date,
     timeSlotStart: Date,
     timeSlotEnd: Date,

@@ -3,7 +3,11 @@ import { Rider } from "../models/Rider.model";
 import { Delivery } from "../models/Delivery.model";
 import { Employee } from "../models/Employee.model";
 import { Branch } from "../models/Branch.model";
-import { planRoadRouteRoundTrip } from "../services/route-optimization.service";
+import { DeliveryRun } from "../models/DeliveryRun.model";
+import {
+  buildRouteSummaryFromDeliveries,
+  buildRouteSummaryFromRun,
+} from "../services/rider-location.service";
 import { buildTenantFilter } from "../services/permission.service";
 import {
   buildMeta,
@@ -12,7 +16,7 @@ import {
   sendSuccess,
 } from "../utils/apiResponse";
 import { AppError } from "../utils/AppError";
-import { deliveryInDateRangeQuery, formatLocalDate, parseDeliveryDateRange } from "../utils/deliveryDateFilter";
+import { deliveryInDateRangeQuery, formatLocalDate, parseDeliveryDateRange, scheduledDateInRangeQuery } from "../utils/deliveryDateFilter";
 import { branchIdFilter, expandMainBranchIds } from "../utils/branchScope";
 
 export async function listRiders(req: Request, res: Response) {
@@ -189,10 +193,11 @@ export async function listLiveRiders(req: Request, res: Response) {
   return sendSuccess(res, withActive);
 }
 
-/** Live rider positions plus shortest planned route from warehouse to assigned stops */
+/** Live rider positions plus current route and last completed route */
 export async function listRiderLocationsWithRoutes(req: Request, res: Response) {
   const { start, end, dateFrom, dateTo } = parseDeliveryDateRange(req.query as Record<string, unknown>);
   const dateFilter = deliveryInDateRangeQuery(start, end);
+  const runDateFilter = scheduledDateInRangeQuery(start, end);
 
   const filter: Record<string, unknown> = {
     ...buildTenantFilter(req.user!),
@@ -230,10 +235,12 @@ export async function listRiderLocationsWithRoutes(req: Request, res: Response) 
         .populate("saleId", "saleNumber")
         .lean();
 
-      const assigned = await Delivery.find({
+      const origin = warehouseByBranch.get(String(rider.branchId)) ?? { lat: 23.588, lng: 58.3829 };
+
+      const currentDeliveries = await Delivery.find({
         riderId: rider._id,
         deletedAt: null,
-        status: { $nin: ["cancelled"] },
+        status: { $in: ["scheduled", "in_transit"] },
         "coordinates.lat": { $exists: true },
         ...dateFilter,
       })
@@ -241,53 +248,33 @@ export async function listRiderLocationsWithRoutes(req: Request, res: Response) 
         .sort({ routeOrder: 1, promisedWindowStart: 1, createdAt: 1 })
         .lean();
 
-      const remainingStops = assigned.length;
-      const origin = warehouseByBranch.get(String(rider.branchId)) ?? { lat: 23.588, lng: 58.3829 };
+      const activeRun = await DeliveryRun.findOne({
+        riderId: rider._id,
+        status: { $in: ["planning", "loading", "active"] },
+        ...runDateFilter,
+      })
+        .sort({ createdAt: -1 })
+        .lean();
 
-      let route: {
-        points: { lat: number; lng: number; label?: string; deliveryId?: string; order: number }[];
-        pathGeometry: { lat: number; lng: number }[];
-        outboundDistanceKm: number;
-        returnDistanceKm: number;
-        roundTripDistanceKm: number;
-        totalDurationMin: number;
-        roundTripCost: number;
-        costPerKm: number;
-        stopCount: number;
-      } | null = null;
+      const route = await buildRouteSummaryFromDeliveries(origin, currentDeliveries, {
+        runId: activeRun ? String(activeRun._id) : undefined,
+        runNumber: activeRun?.runNumber,
+        runStatus: activeRun?.status as "planning" | "loading" | "active" | undefined,
+      });
 
-      const stops = assigned
-        .filter((d) => d.coordinates?.lat != null && d.coordinates?.lng != null)
-        .map((d) => ({
-          id: String(d._id),
-          lat: d.coordinates!.lat,
-          lng: d.coordinates!.lng,
-        }));
+      const previousRun = await DeliveryRun.findOne({
+        riderId: rider._id,
+        status: "completed",
+        ...runDateFilter,
+      })
+        .sort({ endedAt: -1 })
+        .lean();
 
-      if (stops.length > 0) {
-        const { optimized, road } = await planRoadRouteRoundTrip(origin, stops);
-        route = {
-          points: optimized.stops.map((s, i) => {
-            const del = assigned.find((d) => String(d._id) === s.id);
-            const customer = del?.customerId as { name?: string; phone?: string } | undefined;
-            return {
-              lat: s.lat,
-              lng: s.lng,
-              deliveryId: s.id,
-              order: i + 1,
-              label: customer?.name ?? customer?.phone ?? `Stop ${i + 1}`,
-            };
-          }),
-          pathGeometry: road?.pathGeometry ?? [],
-          outboundDistanceKm: road?.outboundDistanceKm ?? optimized.totalDistanceMeters / 1000,
-          returnDistanceKm: road?.returnDistanceKm ?? 0,
-          roundTripDistanceKm: road?.roundTripDistanceKm ?? optimized.totalDistanceMeters / 1000,
-          totalDurationMin: road?.roundTripDurationMin ?? Math.round(optimized.totalDurationSeconds / 60),
-          roundTripCost: road?.roundTripCost ?? (optimized.totalDistanceMeters / 1000) * 10,
-          costPerKm: road?.costPerKm ?? 10,
-          stopCount: optimized.stops.length,
-        };
-      }
+      const previousRoute = previousRun
+        ? await buildRouteSummaryFromRun(origin, previousRun)
+        : null;
+
+      const remainingStops = currentDeliveries.length;
 
       return {
         ...rider,
@@ -295,6 +282,7 @@ export async function listRiderLocationsWithRoutes(req: Request, res: Response) 
         activeDelivery,
         remainingStops,
         route,
+        previousRoute,
         warehouse: origin,
       };
     })

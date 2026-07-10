@@ -78,6 +78,7 @@ export function RiderLocationPage() {
   const { mainBranches, activeMainBranchId } = useBranch();
   const [mainBranchId, setMainBranchId] = useState("");
   const [selectedRiderId, setSelectedRiderId] = useState<string | null>(null);
+  const [routeViewByRider, setRouteViewByRider] = useState<Record<string, "current" | "previous">>({});
   const [dateFrom, setDateFrom] = useState(todayIso);
   const [dateTo, setDateTo] = useState(todayIso);
   const [runtimeSimRunning, setRuntimeSimRunning] = useState(false);
@@ -143,6 +144,16 @@ export function RiderLocationPage() {
   });
 
   const list = data?.riders ?? [];
+  const mapRiders = useMemo(
+    () =>
+      list.map((rider) => {
+        const view = routeViewByRider[rider._id] ?? "current";
+        const displayRoute =
+          view === "previous" && rider.previousRoute ? rider.previousRoute : rider.route;
+        return { ...rider, route: displayRoute };
+      }),
+    [list, routeViewByRider]
+  );
   const withLocation = list.filter((r) => r.isOnShift && r.currentLocation?.lat != null);
   const withRoute = list.filter((r) => (r.route?.stopCount ?? 0) > 0);
   const deliveryCount = data?.deliveryCount ?? 0;
@@ -317,7 +328,7 @@ export function RiderLocationPage() {
             <Skeleton className="h-[520px] w-full rounded-lg" />
           ) : (
             <RiderLocationMap
-              riders={list}
+              riders={mapRiders}
               warehouse={warehouse}
               selectedRiderId={selectedRiderId}
               onSelectRider={(id) => setSelectedRiderId((prev) => (prev === id ? null : id))}
@@ -334,15 +345,21 @@ export function RiderLocationPage() {
             list.map((rider, idx) => {
               const color = ROUTE_COLORS[idx % ROUTE_COLORS.length];
               const selected = selectedRiderId === rider._id;
+              const routeView = routeViewByRider[rider._id] ?? "current";
+              const displayRoute =
+                routeView === "previous" && rider.previousRoute ? rider.previousRoute : rider.route;
               return (
-                <button
+                <div
                   key={rider._id}
-                  type="button"
-                  onClick={() => setSelectedRiderId((prev) => (prev === rider._id ? null : rider._id))}
-                  className={`w-full rounded-md border px-3 py-2 text-left text-sm transition-colors ${
-                    selected ? "border-indigo-400 bg-indigo-500/10" : "border-border hover:bg-muted/50"
+                  className={`w-full rounded-md border text-left text-sm transition-colors ${
+                    selected ? "border-indigo-400 bg-indigo-500/10" : "border-border"
                   }`}
                 >
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRiderId((prev) => (prev === rider._id ? null : rider._id))}
+                    className="w-full px-3 py-2 text-left hover:bg-muted/50"
+                  >
                   <div className="flex items-center justify-between gap-2">
                     <span className="flex items-center gap-2 font-medium">
                       <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: color }} />
@@ -356,26 +373,66 @@ export function RiderLocationPage() {
                     {rider.isOnShift
                       ? locationAge(rider.currentLocation?.updatedAt)
                       : "Off shift"}
-                    {rider.route ? (
+                    {displayRoute ? (
                       <>
                         <br />
-                        Out {rider.route.outboundDistanceKm.toFixed(1)} km + return{" "}
-                        {rider.route.returnDistanceKm.toFixed(1)} km ={" "}
+                        {routeView === "previous" ? (
+                          <span className="text-muted-foreground">Previous run</span>
+                        ) : rider.route?.runStatus === "planning" ? (
+                          <span className="text-emerald-600">Next route</span>
+                        ) : (
+                          <span>Current route</span>
+                        )}
+                        {displayRoute.runNumber ? ` · ${displayRoute.runNumber}` : ""}
+                        <br />
+                        Out {displayRoute.outboundDistanceKm.toFixed(1)} km + return{" "}
+                        {displayRoute.returnDistanceKm.toFixed(1)} km ={" "}
                         <span className="font-medium text-foreground">
-                          {rider.route.roundTripDistanceKm.toFixed(1)} km
+                          {displayRoute.roundTripDistanceKm.toFixed(1)} km
                         </span>
                         <br />
-                        {rider.route.stopCount} stops · ~{rider.route.totalDurationMin} min ·{" "}
+                        {displayRoute.stopCount} stops
+                        {displayRoute.deliveredCount != null
+                          ? ` (${displayRoute.deliveredCount} delivered)`
+                          : ""}{" "}
+                        · ~{displayRoute.totalDurationMin} min ·{" "}
                         <span className="font-medium text-amber-600">
-                          Rs {rider.route.roundTripCost.toFixed(0)}
+                          Rs {displayRoute.roundTripCost.toFixed(0)}
                         </span>{" "}
-                        <span className="text-muted-foreground">(@ Rs {rider.route.costPerKm}/km)</span>
+                        <span className="text-muted-foreground">(@ Rs {displayRoute.costPerKm}/km)</span>
                       </>
                     ) : (
                       " · No assigned stops"
                     )}
                   </p>
-                </button>
+                  </button>
+                  {rider.previousRoute ? (
+                    <div className="flex gap-1 border-t border-border px-2 py-1.5">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={routeView === "current" ? "primary" : "secondary"}
+                        className="h-7 flex-1 text-xs"
+                        onClick={() =>
+                          setRouteViewByRider((prev) => ({ ...prev, [rider._id]: "current" }))
+                        }
+                      >
+                        {rider.route ? "Current / next" : "Current"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={routeView === "previous" ? "primary" : "secondary"}
+                        className="h-7 flex-1 text-xs"
+                        onClick={() =>
+                          setRouteViewByRider((prev) => ({ ...prev, [rider._id]: "previous" }))
+                        }
+                      >
+                        Previous
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
               );
             })
           )}

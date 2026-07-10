@@ -65,6 +65,8 @@ export interface Delivery {
   promisedWindowEnd?: string;
   promiseAcceptedAt?: string;
   preparationMinutes?: number;
+  warehouseReadyAt?: string;
+  travelTimeMinutes?: number;
   routeOrder?: number;
   queuePosition?: number;
   assignmentLocked?: boolean;

@@ -1,6 +1,6 @@
 import { apiRequest, apiRequestWithMeta } from "./client";
 import type { AssignDeliveryInput, Delivery, DispatchDashboard } from "@/types/delivery";
-import type { Rider, RiderRoutePlan } from "@/types/rider";
+import type { Rider, RiderRoutePlan, RiderRouteSummary } from "@/types/rider";
 
 export const deliveryApi = {
   list: (params?: {
@@ -69,19 +69,47 @@ export const deliveryApi = {
     apiRequest<{ whatsappLink: string; message: string }>(`/deliveries/${id}/send-whatsapp`, { method: "POST" }),
 
   myDeliveries: () =>
-    apiRequest<{ rider: Rider; deliveries: Delivery[]; journey: unknown; route: RiderRoutePlan | null }>(
-      "/rider-app/deliveries"
-    ),
+    apiRequest<{
+      rider: Rider;
+      deliveries: Delivery[];
+      journey: unknown;
+      route: RiderRoutePlan | null;
+      previousRoute?: RiderRouteSummary | null;
+      routeLocked?: boolean;
+      canAcceptMoreOrders?: boolean;
+      runNumber?: string;
+      pathSummary?: string | null;
+    }>("/rider-app/deliveries"),
 
   startJourney: () => apiRequest<{ rider: Rider }>("/rider-app/route/start", { method: "POST" }),
 
-  endJourney: () => apiRequest<{ rider: Rider }>("/rider-app/journey/end", { method: "POST" }),
+  endJourney: () =>
+    apiRequest<{
+      rider: Rider;
+      completed?: boolean;
+      assigned?: number;
+      runNumber?: string;
+      message?: string;
+      remainingStops?: number;
+    }>("/rider-app/journey/end", { method: "POST" }),
 
   startShift: () => apiRequest<{ rider: Rider }>("/rider-app/shift/start", { method: "POST" }),
 
   endShift: () => apiRequest<{ rider: Rider }>("/rider-app/shift/end", { method: "POST" }),
 
-  startRoute: () => apiRequest<{ rider: Rider; firstStop?: Delivery }>("/rider-app/route/start", { method: "POST" }),
+  startRoute: () =>
+    apiRequest<{
+      rider: Rider;
+      firstStop?: Delivery;
+      route?: RiderRoutePlan | null;
+      stopsDispatched?: number;
+    }>("/rider-app/route/start", { method: "POST" }),
+
+  updateMyLocation: (lat: number, lng: number) =>
+    apiRequest<{ lat: number; lng: number }>("/rider-app/location", {
+      method: "POST",
+      body: JSON.stringify({ lat, lng }),
+    }),
 
   predictPromise: (data: {
     companyId: string;
@@ -95,6 +123,10 @@ export const deliveryApi = {
     apiRequest<{
       promisedWindowStart: string;
       promisedWindowEnd: string;
+      preparationMinutes: number;
+      warehouseReadyAt: string;
+      travelTimeMinutes: number;
+      estimatedDeliveryAt: string;
       alternativeWindows: { start: string; end: string }[];
       clusterId?: string;
       provisionalRiderId?: string;

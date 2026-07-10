@@ -11,6 +11,7 @@ import {
   assertBranchAccess,
   assertCompanyAccess,
   buildTenantFilter,
+  resolveRequestTenant,
 } from "../services/permission.service";
 import {
   buildMeta,
@@ -145,14 +146,17 @@ async function findOrCreateCustomer(
 }
 
 export async function createCustomer(req: Request, res: Response) {
-  assertCompanyAccess(req.user!, req.body.companyId);
+  const { companyId } = await resolveRequestTenant(req.user!, {
+    companyId: req.body.companyId,
+    branchId: req.body.branchId,
+  });
 
   const phone = normalizePhone(req.body.phone);
   if (!phone) {
     throw new AppError("BAD_REQUEST", "A valid customer phone number is required", 400);
   }
 
-  const existing = await findCustomerByPhone(req.body.companyId, req.body.phone);
+  const existing = await findCustomerByPhone(companyId, req.body.phone);
   if (existing) {
     throw new AppError(
       "CONFLICT",
@@ -162,13 +166,13 @@ export async function createCustomer(req: Request, res: Response) {
   }
 
   const userObjectId = new mongoose.Types.ObjectId(String(req.user!._id));
-  const location = await resolveCustomerLocation(req.body.companyId, {
+  const location = await resolveCustomerLocation(companyId, {
     address: req.body.address,
     coordinates: req.body.coordinates,
   });
 
   const customer = await Customer.create({
-    companyId: req.body.companyId,
+    companyId,
     phone,
     email: req.body.email?.trim() || undefined,
     name: req.body.name?.trim() || undefined,
@@ -225,9 +229,10 @@ export async function listCustomers(req: Request, res: Response) {
 }
 
 export async function resolveCustomerCluster(req: Request, res: Response) {
-  const companyId = String(req.query.companyId ?? "");
-  if (!companyId) throw new AppError("BAD_REQUEST", "companyId is required", 400);
-  assertCompanyAccess(req.user!, companyId);
+  const { companyId } = await resolveRequestTenant(req.user!, {
+    companyId: typeof req.query.companyId === "string" ? req.query.companyId : undefined,
+    branchId: typeof req.query.branchId === "string" ? req.query.branchId : undefined,
+  });
 
   const address = typeof req.query.address === "string" ? req.query.address : undefined;
   const latRaw = req.query.lat;
@@ -388,15 +393,17 @@ export async function deleteCustomer(req: Request, res: Response) {
 }
 
 export async function recordSale(req: Request, res: Response) {
-  assertCompanyAccess(req.user!, req.body.companyId);
-  assertBranchAccess(req.user!, req.body.branchId, req.body.companyId);
+  const { companyId, branchId } = await resolveRequestTenant(req.user!, {
+    companyId: req.body.companyId,
+    branchId: req.body.branchId,
+  });
 
   const product = await Product.findOne({ _id: req.body.productId, deletedAt: null });
   if (!product) throw new AppError("NOT_FOUND", "Product not found", 404);
 
   const stock = await StockLevel.findOne({
-    companyId: req.body.companyId,
-    branchId: req.body.branchId,
+    companyId,
+    branchId,
     productId: req.body.productId,
   });
 
@@ -414,13 +421,13 @@ export async function recordSale(req: Request, res: Response) {
   if (hasValidCustomerId) {
     customer = await Customer.findOne({
       _id: customerId,
-      companyId: req.body.companyId,
+      companyId,
       deletedAt: null,
     });
     if (!customer) throw new AppError("NOT_FOUND", "Customer not found", 404);
   } else {
     const result = await findOrCreateCustomer(
-      req.body.companyId,
+      companyId,
       {
         phone: req.body.customerPhone,
         email: req.body.customerEmail,
@@ -434,10 +441,10 @@ export async function recordSale(req: Request, res: Response) {
     (req as Request & { customerCreated?: boolean }).customerCreated = result.created;
   }
 
-  const saleNumber = await generateSaleNumber(req.body.companyId);
+  const saleNumber = await generateSaleNumber(companyId);
   const sale = await Sale.create({
-    companyId: req.body.companyId,
-    branchId: req.body.branchId,
+    companyId,
+    branchId,
     customerId: customer._id,
     productId: product._id,
     saleNumber,
@@ -450,7 +457,7 @@ export async function recordSale(req: Request, res: Response) {
 
   const updatedStock = await updateStockLevel({
     companyId: product.companyId,
-    branchId: req.body.branchId,
+    branchId,
     productId: product._id,
     quantity: -req.body.quantity,
     type: "sale",
@@ -464,7 +471,7 @@ export async function recordSale(req: Request, res: Response) {
 
   const reorderLevel = updatedStock.reorderLevel ?? product.reorderLevel ?? 0;
   if (updatedStock.currentStock <= reorderLevel && reorderLevel > 0) {
-    const branch = await Branch.findById(req.body.branchId).select("name");
+    const branch = await Branch.findById(branchId).select("name");
     await notifyLowStock(
       product.companyId,
       product.name,
