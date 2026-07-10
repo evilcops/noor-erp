@@ -97,7 +97,7 @@ export async function buildRouteSummaryFromDeliveries(
 
 export async function buildRouteSummaryFromRun(
   origin: { lat: number; lng: number },
-  run: Pick<IDeliveryRun, "_id" | "runNumber" | "status" | "endedAt" | "stops">
+  run: Pick<IDeliveryRun, "_id" | "runNumber" | "status" | "startedAt" | "departedAt" | "endedAt" | "stops">
 ): Promise<RiderRouteSummary | null> {
   if (!run.stops?.length) return null;
 
