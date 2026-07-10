@@ -8,6 +8,8 @@ export interface RiderRouteSummary {
   runNumber?: string;
   runStatus?: "planning" | "loading" | "active" | "completed";
   completedAt?: Date;
+  startedAt?: Date;
+  estimatedReturnAt?: Date;
   points: {
     lat: number;
     lng: number;
@@ -43,6 +45,8 @@ export async function buildRouteSummaryFromDeliveries(
     runNumber?: string;
     runStatus?: RiderRouteSummary["runStatus"];
     completedAt?: Date;
+    startedAt?: Date;
+    estimatedReturnAt?: Date;
   }
 ): Promise<RiderRouteSummary | null> {
   const ordered = [...deliveries]
@@ -65,6 +69,8 @@ export async function buildRouteSummaryFromDeliveries(
     runNumber: meta?.runNumber,
     runStatus: meta?.runStatus,
     completedAt: meta?.completedAt,
+    startedAt: meta?.startedAt,
+    estimatedReturnAt: meta?.estimatedReturnAt,
     points: optimized.stops.map((s, i) => {
       const del = ordered.find((d) => String(d._id) === s.id);
       const customer = del?.customerId as { name?: string; phone?: string } | undefined;
@@ -119,5 +125,7 @@ export async function buildRouteSummaryFromRun(
     runNumber: run.runNumber,
     runStatus: run.status as RiderRouteSummary["runStatus"],
     completedAt: run.endedAt,
+    startedAt: run.departedAt ?? run.startedAt,
+    estimatedReturnAt: run.endedAt,
   });
 }

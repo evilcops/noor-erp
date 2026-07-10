@@ -212,7 +212,9 @@ export async function listRiderLocationsWithRoutes(req: Request, res: Response) 
 
   const riders = await Rider.find(filter)
     .populate("employeeId", "firstName lastName phone")
-    .select("riderCode status isOnShift isOnJourney currentLocation employeeId branchId")
+    .select(
+      "riderCode status isOnShift isOnJourney currentLocation employeeId branchId predictedReturnAt"
+    )
     .lean();
 
   const branchIds = [...new Set(riders.map((r) => String(r.branchId)))];
@@ -256,11 +258,27 @@ export async function listRiderLocationsWithRoutes(req: Request, res: Response) 
         .sort({ createdAt: -1 })
         .lean();
 
+      const routeStartedAt = activeRun?.departedAt ?? activeRun?.startedAt;
+
       const route = await buildRouteSummaryFromDeliveries(origin, currentDeliveries, {
         runId: activeRun ? String(activeRun._id) : undefined,
         runNumber: activeRun?.runNumber,
         runStatus: activeRun?.status as "planning" | "loading" | "active" | undefined,
+        startedAt: routeStartedAt,
       });
+
+      if (route) {
+        const riderReturn = rider.predictedReturnAt;
+        if (riderReturn && riderReturn > new Date()) {
+          route.estimatedReturnAt = riderReturn;
+        } else if (routeStartedAt) {
+          route.estimatedReturnAt = new Date(
+            routeStartedAt.getTime() + route.totalDurationMin * 60_000
+          );
+        } else {
+          route.estimatedReturnAt = new Date(Date.now() + route.totalDurationMin * 60_000);
+        }
+      }
 
       const previousRun = await DeliveryRun.findOne({
         riderId: rider._id,

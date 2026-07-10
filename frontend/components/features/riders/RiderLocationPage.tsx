@@ -74,6 +74,11 @@ function locationAge(updatedAt?: string) {
   return `${Math.round(mins / 60)}h ago`;
 }
 
+function formatRouteTime(iso?: string) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 export function RiderLocationPage() {
   const { mainBranches, activeMainBranchId } = useBranch();
   const [mainBranchId, setMainBranchId] = useState("");
@@ -400,6 +405,34 @@ export function RiderLocationPage() {
                           Rs {displayRoute.roundTripCost.toFixed(0)}
                         </span>{" "}
                         <span className="text-muted-foreground">(@ Rs {displayRoute.costPerKm}/km)</span>
+                        <br />
+                        {displayRoute.startedAt ? (
+                          <>
+                            Route started:{" "}
+                            <span className="font-medium text-foreground">
+                              {formatRouteTime(displayRoute.startedAt)}
+                            </span>
+                            <br />
+                          </>
+                        ) : displayRoute.runStatus === "planning" || displayRoute.runStatus === "loading" ? (
+                          <>
+                            Route started: <span className="text-muted-foreground">Not departed</span>
+                            <br />
+                          </>
+                        ) : null}
+                        {displayRoute.estimatedReturnAt ? (
+                          <>
+                            Est. back at warehouse:{" "}
+                            <span className="font-medium text-foreground">
+                              {formatRouteTime(displayRoute.estimatedReturnAt)}
+                            </span>
+                            {!displayRoute.startedAt &&
+                            (displayRoute.runStatus === "planning" ||
+                              displayRoute.runStatus === "loading") ? (
+                              <span className="text-muted-foreground"> (if leaves now)</span>
+                            ) : null}
+                          </>
+                        ) : null}
                       </>
                     ) : (
                       " · No assigned stops"

@@ -66,6 +66,8 @@ export interface RiderRouteSummary {
   runNumber?: string;
   runStatus?: "planning" | "loading" | "active" | "completed";
   completedAt?: string;
+  startedAt?: string;
+  estimatedReturnAt?: string;
   points: RiderRoutePoint[];
   pathGeometry: { lat: number; lng: number }[];
   outboundDistanceKm: number;
