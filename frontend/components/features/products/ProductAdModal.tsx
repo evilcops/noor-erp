@@ -25,8 +25,17 @@ const AD_LANGUAGE_OPTIONS: { value: AdLanguage; label: string }[] = [
   { value: "ar", label: "Arabic" },
 ];
 
-/** Short ads = fewer OpenArt credits + faster generation */
-const SHORT_AD_SECONDS = 4;
+const AD_SLOGAN_TEMPLATES: Record<AdLanguage, (product: string) => string> = {
+  en: (product) =>
+    `Freshness and quality — ${product}, now within your budget. Get it today from your nearest store or order online.`,
+  ur: (product) =>
+    `تازگی اور معیار — ${product}، اب آپ کے بجٹ میں۔ آج ہی اپنے قریبی اسٹور سے حاصل کریں یا آن لائن آرڈر کریں۔`,
+  ar: (product) =>
+    `انتعاش وجودة — ${product}، الآن في متناول ميزانيتك. احصل عليه اليوم من أقرب متجر أو اطلب عبر الإنترنت.`,
+};
+
+/** 8s ads with slogan + accurate lip sync */
+const SHORT_AD_SECONDS = 8;
 
 type AdStep = "history" | "form" | "processing" | "preview" | "revise" | "failed";
 
@@ -271,14 +280,14 @@ export function ProductAdModal({ open, onOpenChange, product, companyId }: Produ
               alt="Brand spokesperson"
               className="h-16 w-16 rounded-md object-cover"
             />
-            <div className="text-sm">
-              <p className="font-medium">Brand character included</p>
-              <p className="text-muted-foreground">
-                Ads for <span className="font-medium text-foreground">{product.name}</span> use your
-                fixed spokesperson and a short {SHORT_AD_SECONDS}s clip (faster, fewer credits).
-                Approve an ad before creating purchase orders.
-              </p>
-            </div>
+              <div className="text-sm">
+                <p className="font-medium">My brand character</p>
+                <p className="text-muted-foreground">
+                  Ads for <span className="font-medium text-foreground">{product.name}</span> always
+                  keep this girl&apos;s face. Outfit, background, and slogan adapt to the product
+                  ({SHORT_AD_SECONDS}s, lip sync). Approve before creating purchase orders.
+                </p>
+              </div>
           </div>
 
           <div className="flex items-center justify-between gap-2">
@@ -359,10 +368,10 @@ export function ProductAdModal({ open, onOpenChange, product, companyId }: Produ
         <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
               Pick language and character. We use OpenArt{" "}
-              <span className="font-medium text-foreground">Grok Imagine</span> (fast + audio,
-              lower credits) for a {SHORT_AD_SECONDS}s ad of{" "}
+              <span className="font-medium text-foreground">Grok Imagine</span> (fast + audio +
+              lip sync) for an {SHORT_AD_SECONDS}s ad of{" "}
               <span className="font-medium text-foreground">{product.name}</span> with this same
-              woman.
+              woman speaking your slogan — she is introduced as your official brand character.
             </p>
 
           <div>
@@ -380,12 +389,12 @@ export function ProductAdModal({ open, onOpenChange, product, companyId }: Produ
                   options={[
                     {
                       value: "noor-brand-woman",
-                      label: "Noor brand woman (blue kameez) — locked",
+                      label: "My brand character — same face always",
                     },
                   ]}
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Same face & outfit every time (uploaded as OpenArt reference).
+                  Same face every time. Outfit & background change to match the product.
                 </p>
               </div>
             </div>
@@ -399,7 +408,13 @@ export function ProductAdModal({ open, onOpenChange, product, companyId }: Produ
               options={AD_LANGUAGE_OPTIONS}
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              She will speak and present the product in the selected language.
+              Product slogan she will speak (changes with product + language):
+            </p>
+            <p
+              className="mt-1 rounded-md border bg-muted/40 px-3 py-2 text-sm"
+              dir={language === "en" ? "ltr" : "rtl"}
+            >
+              {AD_SLOGAN_TEMPLATES[language](product.name)}
             </p>
           </div>
 
@@ -421,7 +436,7 @@ export function ProductAdModal({ open, onOpenChange, product, companyId }: Produ
               {polledAd ? statusLabel(polledAd) : "Generating short video with OpenArt…"}
             </p>
             <p className="text-sm text-muted-foreground">
-              Fast model (Grok Imagine) · {SHORT_AD_SECONDS}s · 480p · Elapsed:{" "}
+              Fast model (Grok Imagine) · {SHORT_AD_SECONDS}s · lip sync · 480p · Elapsed:{" "}
               {formatElapsed(elapsed)}
             </p>
           </div>

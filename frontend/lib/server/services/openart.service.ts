@@ -4,20 +4,21 @@ import { logger } from "../utils/logger";
 const DEFAULT_BASE_URL = "https://openart.ai/suite/api";
 /** Fast tier with native audio — much cheaper/quicker than Seedance 2.0 (~150 vs ~800 credits). */
 const DEFAULT_MODEL = "grok-imagine";
-/** Short ads use fewer credits and finish faster (Grok supports from ~1s). */
-export const DEFAULT_AD_DURATION_SECONDS = 4;
+/** Default ad length — short enough for cost, long enough for the slogan + lip sync. */
+export const DEFAULT_AD_DURATION_SECONDS = 8;
 const MAX_AD_DURATION_SECONDS = 9;
 const DEFAULT_RESOLUTION = "480p";
 const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 8 * 60 * 1000;
 
-/** Brand spokesperson used in every Noor product ad (matches /public/marketing/ad-character.png). */
+/** Official Noor brand character — FACE locked; outfit/background adapt per product. */
+export const AD_CHARACTER_NAME = "Noor Brand Woman";
 export const AD_CHARACTER_DESCRIPTION =
-  "Use THIS EXACT woman as the only on-camera spokesperson (same face, hair, outfit, jewelry — do not invent a different person): young South Asian woman, fair complexion, warm smile, long dark wavy hair under a colorful Phulkari-style dupatta, royal blue embroidered kameez with gold and red detailing, bright red salwar, silver jhumka earrings, colorful bangles. Keep her identity locked for the full clip.";
+  `This is my official brand character "${AD_CHARACTER_NAME}". ALWAYS keep her EXACT same face from the character reference image: fair complexion, warm smile with slight dimples, long wavy dark brown hair, same facial identity — never change or replace her face. Introduce her as the brand spokesperson.`;
 
 export const AD_CHARACTER_PUBLIC_PATH = "/marketing/ad-character.png";
 export const AD_CHARACTER_ID = "noor-brand-woman";
-export const AD_CHARACTER_LABEL = "Noor brand woman (blue kameez)";
+export const AD_CHARACTER_LABEL = "My brand character (same face always)";
 
 /** In-memory cache of OpenArt CDN URL after we upload the local character file once. */
 let cachedCharacterAssetUrl: string | undefined;
@@ -179,7 +180,37 @@ export function languageLabel(language: AdLanguage) {
 }
 
 /**
- * Short, credit-efficient product ad prompt with fixed brand character + language.
+ * Product-aware marketing slogan in the selected language.
+ * Base message: freshness & quality in your budget — buy nearby or online.
+ */
+export function adSloganForProduct(input: {
+  language: AdLanguage;
+  productName: string;
+  brand?: string;
+  category?: string;
+}) {
+  const product = input.brand
+    ? `${input.brand} ${input.productName}`
+    : input.productName;
+  const categoryHint = input.category ? ` (${input.category})` : "";
+
+  switch (input.language) {
+    case "ur":
+      return `تازگی اور معیار — ${product}${categoryHint}، اب آپ کے بجٹ میں۔ آج ہی اپنے قریبی اسٹور سے حاصل کریں یا آن لائن آرڈر کریں۔`;
+    case "ar":
+      return `انتعاش وجودة — ${product}${categoryHint}، الآن في متناول ميزانيتك. احصل عليه اليوم من أقرب متجر أو اطلب عبر الإنترنت.`;
+    default:
+      return `Freshness and quality — ${product}${categoryHint}, now within your budget. Get it today from your nearest store or order online.`;
+  }
+}
+
+/** @deprecated use adSloganForProduct */
+export function adSloganForLanguage(language: AdLanguage, productName = "our product") {
+  return adSloganForProduct({ language, productName });
+}
+
+/**
+ * 8s product ad: same face always; outfit/background + slogan adapt to the product.
  */
 export function buildProductAdPrompt(input: {
   productName: string;
@@ -193,29 +224,40 @@ export function buildProductAdPrompt(input: {
 }) {
   const duration = clampAdDuration(input.durationSeconds);
   const lang = languageLabel(input.language);
-  const spoken =
-    input.language === "ur"
-      ? `She speaks clear Urdu only, presenting ${input.productName}.`
-      : input.language === "ar"
-        ? `She speaks clear Arabic only, presenting ${input.productName}.`
-        : `She speaks clear English only, presenting ${input.productName}.`;
+  const slogan = adSloganForProduct({
+    language: input.language,
+    productName: input.productName,
+    brand: input.brand,
+    category: input.category,
+  });
+
+  const wardrobeContext = [
+    input.category ? `category ${input.category}` : null,
+    `product ${input.productName}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   const parts = [
-    `Create a short ${duration}-second product ad for ${input.productName}, spoken and on-screen text in ${lang}.`,
+    `Create an exactly ${duration}-second product ad for ${input.productName}.`,
+    `All spoken dialogue and on-screen text must be in ${lang} only.`,
     AD_CHARACTER_DESCRIPTION,
-    "CRITICAL: reuse the identical spokesperson look in every frame — do not change her face, age, skin tone, hair, or outfit.",
-    spoken,
-    "Keep the clip short and simple: spokesperson holds/presents the product, one clear product focus.",
+    "FACE LOCK (MOST IMPORTANT): her face must stay identical to the character reference in every frame — same eyes, nose, lips, skin tone, and facial structure. No face swap. No different woman.",
+    `OUTFIT & BACKGROUND: change her dressing and setting to match selling ${wardrobeContext}. Clothes, colors, and location should feel natural for this product, but her FACE must remain the same person.`,
+    "She holds or clearly presents the product while speaking.",
+    `She clearly speaks this exact product-specific line in ${lang}: "${slogan}"`,
+    "LIP SYNC MUST BE ACCURATE: mouth shapes must match every syllable of the spoken line; no mismatched or frozen lips; natural jaw and lip movement synced to the audio.",
+    "Include clear native voiceover/audio in the selected language with the lip sync locked to that speech.",
   ];
 
   if (input.brand) parts.push(`Brand: ${input.brand}.`);
   if (input.category) parts.push(`Category: ${input.category}.`);
   if (input.description) {
     const shortDesc = input.description.slice(0, 120);
-    parts.push(`Product: ${shortDesc}.`);
+    parts.push(`Product details: ${shortDesc}.`);
   }
   if (input.sellingPrice != null) {
-    parts.push(`Price: ${input.sellingPrice} OMR.`);
+    parts.push(`Mention value around ${input.sellingPrice} OMR if natural.`);
   }
   if (input.revisionFeedback?.trim()) {
     parts.push(`Improve based on this feedback: ${input.revisionFeedback.trim()}.`);
@@ -259,23 +301,12 @@ export async function getDefaultProjectId() {
 }
 
 /**
- * Upload the local brand character PNG to OpenArt so image-to-video can lock the same face.
- * Failures are soft — ads still generate via text2video with the character locked in the prompt.
+ * Upload the local brand character image to OpenArt and return a CDN URL for image2video.
+ * Soft-fails so ads can still run with a strong character prompt.
  */
 export async function ensureCharacterAssetUrl(projectId?: string): Promise<string | undefined> {
   const cfg = assertConfigured();
   if (cfg.mock) return undefined;
-  // Character file upload to OpenArt is optional and currently unstable against
-  // suite validation. Set OPENART_CHARACTER_ASSET_URL to a known CDN image URL
-  // to enable image2video start-frame; otherwise we rely on the prompt lock.
-  if (env("OPENART_DISABLE_CHARACTER_UPLOAD") !== "false") {
-    const fromEnv = env("OPENART_CHARACTER_ASSET_URL");
-    if (fromEnv && isPublicHttpsUrl(fromEnv)) {
-      cachedCharacterAssetUrl = fromEnv;
-      return fromEnv;
-    }
-    return cachedCharacterAssetUrl;
-  }
 
   try {
     const fromEnv = env("OPENART_CHARACTER_ASSET_URL");
@@ -284,6 +315,11 @@ export async function ensureCharacterAssetUrl(projectId?: string): Promise<strin
       return fromEnv;
     }
     if (cachedCharacterAssetUrl) return cachedCharacterAssetUrl;
+
+    // Opt out only when explicitly disabled
+    if (env("OPENART_DISABLE_CHARACTER_UPLOAD") === "true") {
+      return undefined;
+    }
 
     const fs = await import("fs/promises");
     const path = await import("path");
@@ -298,7 +334,7 @@ export async function ensureCharacterAssetUrl(projectId?: string): Promise<strin
     }
 
     const resolvedProjectId = projectId || (await getDefaultProjectId());
-    const filename = "noor-ad-character.png";
+    const filename = "noor-brand-character.png";
     const contentType = "image/png";
 
     const signed = await openArtFetch<{
@@ -327,13 +363,23 @@ export async function ensureCharacterAssetUrl(projectId?: string): Promise<strin
       return undefined;
     }
 
+    // Persist with fields that match suite media schema (resourceType / tool enums).
     const persisted = await openArtFetch<{
       url?: string;
       id?: string;
       data?: { url?: string; id?: string };
     }>("/upload/persist", {
       method: "POST",
-      body: JSON.stringify({ url: assetUrl, projectId: resolvedProjectId }),
+      body: JSON.stringify({
+        url: assetUrl,
+        projectId: resolvedProjectId,
+        resourceType: "image",
+        tool: "create-character",
+        name: AD_CHARACTER_NAME,
+        filename,
+        contentType,
+        size: buffer.length,
+      }),
     });
 
     const finalUrl = persisted.url || persisted.data?.url || assetUrl;
@@ -343,7 +389,7 @@ export async function ensureCharacterAssetUrl(projectId?: string): Promise<strin
     }
 
     cachedCharacterAssetUrl = finalUrl;
-    logger.info("OpenArt brand character uploaded", { url: finalUrl });
+    logger.info("OpenArt brand character registered", { url: finalUrl, name: AD_CHARACTER_NAME });
     return finalUrl;
   } catch (error) {
     logger.warn("OpenArt character upload skipped", {
@@ -371,16 +417,13 @@ export async function submitVideoGeneration(
     throw new AppError("VALIDATION_ERROR", "Invalid ad duration", 400);
   }
 
-  // Optional HTTPS character/product start frame (env OPENART_CHARACTER_ASSET_URL).
-  // Do not call OpenArt upload APIs here — they currently reject with unrelated Zod errors.
+  // Prefer image2video when our brand character image is available on OpenArt CDN.
   const referenceImageUrl =
     (input.useBrandCharacter !== false
       ? await ensureCharacterAssetUrl(projectId)
       : undefined) ||
     (isPublicHttpsUrl(input.referenceImageUrl) ? input.referenceImageUrl : undefined);
 
-  // Always start with verified text2video body. Only attach startImageUrl when
-  // we already have a known public HTTPS asset URL.
   const mode: "text2video" | "image2video" = referenceImageUrl ? "image2video" : "text2video";
 
   const body: Record<string, unknown> = {
@@ -396,7 +439,9 @@ export async function submitVideoGeneration(
   };
 
   if (referenceImageUrl && mode === "image2video") {
+    // Frame/character start image — animate THIS exact model
     body.startImageUrl = referenceImageUrl;
+    body.imageUrl = referenceImageUrl;
   }
 
   try {
