@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Eye, Megaphone, Pencil, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SearchBar } from "@/components/common/SearchBar";
@@ -18,6 +18,7 @@ import { BranchSubBranchSelect } from "@/components/common/BranchSubBranchSelect
 import { Select } from "@/components/ui/Select";
 import { resolveMainAndSubBranchId } from "@/lib/branch-utils";
 import { ProductImage } from "@/components/features/products/ProductImage";
+import { ProductAdModal } from "@/components/features/products/ProductAdModal";
 import { useAuth, useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { productApi } from "@/lib/api/products";
@@ -66,6 +67,8 @@ export function ProductsPage() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [formImages, setFormImages] = useState<string[]>([]);
+  const [adOpen, setAdOpen] = useState(false);
+  const [adProduct, setAdProduct] = useState<Product | null>(null);
 
   const companyId = user?.companyId ?? branches[0]?.companyId ?? "";
 
@@ -138,6 +141,11 @@ export function ProductsPage() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const openCreateAd = (product: Product) => {
+    setAdProduct(product);
+    setAdOpen(true);
+  };
 
   const updateMut = useMutation({
     mutationFn: async () => {
@@ -245,6 +253,11 @@ export function ProductsPage() {
             <Button variant="ghost" size="icon" onClick={() => void openDetail(r)}><Eye className="h-4 w-4" /></Button>
             {can("product:edit") ? (
               <Button variant="ghost" size="icon" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button>
+            ) : null}
+            {can("product:create") ? (
+              <Button variant="ghost" size="icon" title="Create Ad" onClick={() => openCreateAd(r)}>
+                <Megaphone className="h-4 w-4" />
+              </Button>
             ) : null}
             {can("product:delete") ? (
               <Button variant="ghost" size="icon" onClick={() => { setSelected(r); setDeleteOpen(true); }}><Trash2 className="h-4 w-4" /></Button>
@@ -375,7 +388,7 @@ export function ProductsPage() {
             ) : null}
           </div>
         </div>
-        <div className="mt-6 flex justify-end gap-2">
+        <div className="mt-6 flex flex-wrap items-center justify-end gap-2">
           <Button variant="secondary" onClick={() => setFormOpen(false)}>Cancel</Button>
           <Button
             disabled={!form.name || createMut.isPending || updateMut.isPending}
@@ -418,9 +431,27 @@ export function ProductsPage() {
                 </div>
               </div>
             ) : null}
+            {can("product:create") ? (
+              <div className="flex justify-end pt-2">
+                <Button onClick={() => openCreateAd(selected)}>
+                  <Megaphone className="mr-2 h-4 w-4" />
+                  Create Ad
+                </Button>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </Modal>
+
+      <ProductAdModal
+        open={adOpen}
+        onOpenChange={(open) => {
+          setAdOpen(open);
+          if (!open) setAdProduct(null);
+        }}
+        product={adProduct}
+        companyId={companyId}
+      />
 
       <ConfirmationModal
         open={deleteOpen}

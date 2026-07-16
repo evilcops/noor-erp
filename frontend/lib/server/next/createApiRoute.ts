@@ -155,7 +155,8 @@ async function parseRequestPayload(
 
   if (contentType.includes("application/json")) {
     try {
-      return { body: await request.json() };
+      const parsed = await request.json();
+      return { body: parsed ?? {} };
     } catch {
       return { body: {} };
     }
