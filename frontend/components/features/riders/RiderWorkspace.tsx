@@ -147,6 +147,8 @@ export function RiderWorkspace() {
     onSuccess: (result) => {
       if (result.assigned && result.assigned > 0) {
         toast.success(result.message ?? `Next route assigned — ${result.assigned} stops`);
+      } else if ((result as { refusedItemsReturned?: number }).refusedItemsReturned) {
+        toast.success(result.message ?? "Refused items submitted to warehouse");
       } else {
         toast.success(result.message ?? "Back at warehouse");
       }
@@ -420,16 +422,11 @@ export function RiderWorkspace() {
                 <MapPin className="mr-1 inline h-3.5 w-3.5" />
                 {d.deliveryAddress ?? d.area ?? "—"}
               </p>
-              {d.status === "scheduled" || d.status === "in_transit" ? (
-                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {d.status === "scheduled" ||
+              d.status === "in_transit" ||
+              d.status === "pending_assignment" ? (
+                <div className="mt-3 grid grid-cols-2 gap-2">
                   <Button
-                    variant="secondary"
-                    onClick={() => statusMut.mutate({ id: d._id, status: "in_transit" })}
-                  >
-                    En route
-                  </Button>
-                  <Button
-                    variant="secondary"
                     onClick={() => {
                       setActiveDelivery(d);
                       setCash("");
@@ -438,38 +435,41 @@ export function RiderWorkspace() {
                     }}
                   >
                     <CheckCircle className="mr-1 h-3.5 w-3.5" />
-                    Delivered
+                    Complete
                   </Button>
                   <Button
                     variant="secondary"
-                    onClick={() =>
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          "Mark as refused? Take the products back and tap Return to Warehouse so inventory can restock them."
+                        )
+                      ) {
+                        return;
+                      }
                       statusMut.mutate({
                         id: d._id,
-                        status: "failed",
-                        failureReason: "customer_unavailable",
-                        notes: "Customer unavailable",
-                      })
-                    }
+                        status: "refused",
+                        failureReason: "customer_refused",
+                        notes: "Customer refused",
+                      });
+                    }}
                   >
                     <XCircle className="mr-1 h-3.5 w-3.5" />
-                    Unavailable
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() =>
-                      statusMut.mutate({ id: d._id, status: "refused", notes: "Customer refused" })
-                    }
-                  >
                     Refused
                   </Button>
                 </div>
+              ) : d.status === "refused" ? (
+                <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">
+                  Refused — return products to warehouse, then tap Return to Warehouse.
+                </p>
               ) : null}
             </div>
           ))
         )}
       </div>
 
-      <Modal open={notesOpen} onOpenChange={setNotesOpen} title="Complete delivery">
+      <Modal open={notesOpen} onOpenChange={setNotesOpen} title="Complete order">
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
@@ -515,7 +515,7 @@ export function RiderWorkspace() {
               });
             }}
           >
-            Confirm delivered
+            Confirm completed
           </Button>
         </div>
       </Modal>

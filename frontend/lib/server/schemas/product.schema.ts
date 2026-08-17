@@ -10,7 +10,7 @@ export const createProductSchema = z.object({
   subCategory: z.string().optional(),
   brand: z.string().optional(),
   supplierId: z.string().optional(),
-  description: z.string().optional(),
+  description: z.string().trim().min(10, "Description is required (min 10 characters)"),
   specifications: z.string().optional(),
   purchaseCost: z.number().min(0).optional(),
   sellingPrice: z.number().min(0).optional(),
@@ -28,7 +28,12 @@ export const createProductSchema = z.object({
     .optional(),
 });
 
-export const updateProductSchema = createProductSchema.partial().omit({ companyId: true });
+export const updateProductSchema = createProductSchema
+  .partial()
+  .omit({ companyId: true })
+  .extend({
+    description: z.string().trim().min(10, "Description is required (min 10 characters)").optional(),
+  });
 
 export const stockAdjustmentSchema = z.object({
   branchId: z.string().min(1),

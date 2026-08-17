@@ -9,6 +9,7 @@ import {
   buildTenantFilter,
   resolveRequestTenant,
 } from "../services/permission.service";
+import { assertProductsHaveApprovedAds } from "../services/product-ad.service";
 import {
   buildMeta,
   buildSortQuery,
@@ -55,6 +56,9 @@ export async function createPurchase(req: Request, res: Response) {
     companyId: req.body.companyId,
     branchId: req.body.branchId,
   });
+
+  const productIds = (req.body.items as { productId: string }[]).map((i) => i.productId);
+  await assertProductsHaveApprovedAds(companyId, productIds);
 
   const items = await enrichPurchaseItems(req.body.items);
   const poNumber = await generatePoNumber(companyId);

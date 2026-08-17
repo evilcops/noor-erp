@@ -30,7 +30,8 @@ export type OrderSource =
   | "standing_fortnightly"
   | "scheduled"
   | "previous_day"
-  | "replenishment";
+  | "replenishment"
+  | "store_app";
 
 export interface IDeliveryWastage {
   productId: mongoose.Types.ObjectId;
@@ -113,6 +114,7 @@ const deliverySchema = new Schema<IDelivery>(
         "scheduled",
         "previous_day",
         "replenishment",
+        "store_app",
       ],
       default: "new_order",
     },

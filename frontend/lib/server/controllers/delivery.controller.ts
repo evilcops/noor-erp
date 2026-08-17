@@ -12,9 +12,21 @@ import {
 } from "../services/delivery-scheduling.service";
 import { optimizeRoute } from "../services/route-optimization.service";
 import { buildWhatsAppOrderLink } from "../services/delivery.service";
-import { advanceWarehouseStatus, runDispatchCycle, scheduleFleetOptimise, handleCustomerUnavailable, provisionalAssignRider, onRiderBackAtWarehouse, countUndeliveredStops } from "../services/dispatch-engine.service";
+import {
+  advanceWarehouseStatus,
+  runDispatchCycle,
+  scheduleFleetOptimise,
+  handleCustomerUnavailable,
+  provisionalAssignRider,
+  onRiderBackAtWarehouse,
+  countUndeliveredStops,
+} from "../services/dispatch-engine.service";
 import { buildRiderRoutePlan } from "../services/rider-route.service";
 import { buildRouteSummaryFromRun } from "../services/rider-location.service";
+import {
+  createRefusedItemsFromDelivery,
+  markRefusedItemsReturnedByRider,
+} from "../services/refused-item.service";
 import {
   buildMeta,
   buildSortQuery,
@@ -253,6 +265,20 @@ export async function updateDeliveryStatus(req: Request, res: Response) {
   delivery.updatedBy = req.user!._id;
   await delivery.save();
 
+  if (body.status === "refused") {
+    await createRefusedItemsFromDelivery(String(delivery._id), {
+      reason: body.failureReason || body.notes || "Customer refused",
+      userId: String(req.user!._id),
+    });
+  }
+
+  if (body.status === "delivered" && delivery.saleId) {
+    await Sale.updateOne(
+      { _id: delivery.saleId, status: { $ne: "cancelled" } },
+      { $set: { status: "completed" } }
+    );
+  }
+
   if (body.status === "failed" && body.failureReason === "customer_unavailable") {
     await handleCustomerUnavailable(String(delivery._id));
   }
@@ -264,9 +290,10 @@ export async function updateDeliveryStatus(req: Request, res: Response) {
       trigger: `delivery_${body.status}`,
     });
 
-    if (body.status === "delivered" && delivery.riderId) {
+    if ((body.status === "delivered" || body.status === "refused") && delivery.riderId) {
       const remaining = await countUndeliveredStops(delivery.riderId);
       if (remaining === 0) {
+        await markRefusedItemsReturnedByRider(String(delivery.riderId));
         const result = await onRiderBackAtWarehouse(delivery.riderId);
         if (result.assigned > 0) {
           (req as Request & { nextRouteAssigned?: number }).nextRouteAssigned = result.assigned;
@@ -495,7 +522,7 @@ export async function startRoute(req: Request, res: Response) {
   const pending = await Delivery.find({
     riderId: rider._id,
     deletedAt: null,
-    status: { $in: ["scheduled", "rescheduled"] },
+    status: { $in: ["scheduled", "rescheduled", "pending_assignment"] },
     assignmentLocked: false,
     warehouseStatus: { $ne: "dispatched" },
   })
@@ -533,7 +560,7 @@ export async function startRoute(req: Request, res: Response) {
   const deliveries = await Delivery.find({
     riderId: rider._id,
     deletedAt: null,
-    status: { $in: ["scheduled", "rescheduled"] },
+    status: { $in: ["scheduled", "rescheduled", "pending_assignment"] },
     assignmentLocked: false,
     warehouseStatus: { $ne: "dispatched" },
   });
@@ -581,18 +608,22 @@ export async function startRoute(req: Request, res: Response) {
 
 export async function returnToWarehouse(req: Request, res: Response) {
   const rider = await getAuthenticatedRider(req);
+  const refusedReturn = await markRefusedItemsReturnedByRider(rider._id);
   const result = await onRiderBackAtWarehouse(rider._id);
 
   const refreshed = await Rider.findById(rider._id).lean();
   return sendSuccess(res, {
     rider: refreshed,
     ...result,
+    refusedItemsReturned: refusedReturn.returned,
     message:
       result.assigned > 0
         ? `Back at warehouse — next route assigned (${result.assigned} stops)`
         : result.remainingStops
           ? `${result.remainingStops} stop(s) still open`
-          : "Back at warehouse",
+          : refusedReturn.returned > 0
+            ? `Back at warehouse — ${refusedReturn.returned} refused item(s) ready for restock`
+            : "Back at warehouse",
   });
 }
 
@@ -612,22 +643,58 @@ export async function getMyDeliveries(req: Request, res: Response) {
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
+  const recentStoreCutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
 
   const deliveries = await Delivery.find({
     riderId: rider._id,
     deletedAt: null,
-    status: { $in: ["scheduled", "in_transit", "rescheduled"] },
+    status: { $in: ["scheduled", "in_transit", "rescheduled", "pending_assignment"] },
     $or: [
       { scheduledDate: { $gte: today, $lt: tomorrow } },
+      { promisedWindowStart: { $gte: today, $lt: tomorrow } },
+      { createdAt: { $gte: today, $lt: tomorrow } },
       { scheduledDate: null },
+      { orderSource: "store_app", createdAt: { $gte: recentStoreCutoff } },
     ],
   })
     .populate("customerId", "name phone address area coordinates")
     .populate("saleId", "saleNumber quantity totalAmount")
     .populate({ path: "saleId", populate: { path: "productId", select: "name sku" } })
-    .sort({ routeOrder: 1, timeSlotStart: 1 })
+    .sort({ routeOrder: 1, timeSlotStart: 1, createdAt: 1 })
     .lean();
 
+  // If route already started, open stops must be in_transit so Delivered/Refused buttons show
+  if (rider.isOnJourney) {
+    for (const d of deliveries) {
+      if (["pending_assignment", "scheduled", "rescheduled"].includes(d.status)) {
+        await Delivery.updateOne(
+          { _id: d._id },
+          {
+            $set: {
+              status: "in_transit",
+              warehouseStatus: "dispatched",
+              assignmentLocked: true,
+            },
+          }
+        );
+        d.status = "in_transit";
+        d.warehouseStatus = "dispatched";
+        d.assignmentLocked = true;
+      }
+    }
+  } else {
+    for (const d of deliveries) {
+      if (d.orderSource === "store_app" && d.status === "pending_assignment") {
+        await Delivery.updateOne({ _id: d._id }, { $set: { status: "scheduled" } });
+        d.status = "scheduled";
+      }
+      const sched = d.scheduledDate ? new Date(d.scheduledDate) : null;
+      if (d.orderSource === "store_app" && (!sched || sched < today || sched >= tomorrow)) {
+        await Delivery.updateOne({ _id: d._id }, { $set: { scheduledDate: new Date() } });
+        d.scheduledDate = new Date();
+      }
+    }
+  }
   const journey = await RiderJourney.findOne({
     riderId: rider._id,
     status: "active",

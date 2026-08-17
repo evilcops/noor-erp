@@ -1,0 +1,119 @@
+@import "tailwindcss";
+
+:root {
+  /* Talabat-inspired orange & white */
+  --cream: #f7f2ed;
+  --ink: #1a1a1a;
+  --muted: #6b6b6b;
+  --forest: #ff5a00;
+  --forest-dark: #e04e00;
+  --mint: #ffe8d9;
+  --lime: #fff4ec;
+  --sand: #fff8f3;
+  --card: #ffffff;
+  --brand-shadow: 255, 90, 0;
+  background: var(--cream);
+  color: var(--ink);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1000px 520px at 8% -8%, rgba(255, 90, 0, 0.08), transparent 55%),
+    radial-gradient(800px 480px at 100% 0%, rgba(255, 180, 120, 0.18), transparent 50%),
+    var(--cream);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes float-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+
+.animate-float-in {
+  animation: float-in 0.55s ease-out both;
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 3.2s ease-in-out infinite;
+}
+
+.brand-mark {
+  display: inline-grid;
+  place-items: center;
+  transform: rotate(-6deg);
+  border-radius: 0.85rem;
+  background: var(--forest);
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  box-shadow: 0 10px 24px -10px rgba(var(--brand-shadow), 0.65);
+}
+
+.hero-wave {
+  position: relative;
+}
+
+.hero-wave::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 28px;
+  background:
+    radial-gradient(ellipse 60% 100% at 20% 100%, #fff 55%, transparent 56%),
+    radial-gradient(ellipse 55% 100% at 55% 100%, #fff 55%, transparent 56%),
+    radial-gradient(ellipse 50% 100% at 85% 100%, #fff 55%, transparent 56%);
+  pointer-events: none;
+}
+
+.store-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 640px) {
+  .store-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .store-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1400px) {
+  .store-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}

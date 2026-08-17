@@ -8,6 +8,7 @@ import {
   buildRouteSummaryFromDeliveries,
   buildRouteSummaryFromRun,
 } from "../services/rider-location.service";
+import { BIKE_KM_PER_LITER } from "../services/route-optimization.service";
 import { buildTenantFilter } from "../services/permission.service";
 import {
   buildMeta,
@@ -318,4 +319,81 @@ export async function listRiderLocationsWithRoutes(req: Request, res: Response) 
     totalRoundTripKm,
     riders: snapshots,
   });
+}
+
+/** Delivery history for one rider with estimated fuel (1 L / 45 km from run distance). */
+export async function getRiderHistory(req: Request, res: Response) {
+  const tenant = buildTenantFilter(req.user!);
+  const rider = await Rider.findOne({ _id: req.params.id, ...tenant, deletedAt: null })
+    .populate("employeeId", "firstName lastName phone")
+    .populate("branchId", "name code")
+    .lean();
+
+  if (!rider) throw new AppError("NOT_FOUND", "Rider not found", 404);
+
+  const { page, limit, skip } = parsePagination(req.query);
+  const { start, end, dateFrom, dateTo } = parseDeliveryDateRange(req.query as Record<string, unknown>);
+  const deliveryDateFilter = deliveryInDateRangeQuery(start, end);
+  const runDateFilter = scheduledDateInRangeQuery(start, end);
+
+  const deliveryFilter: Record<string, unknown> = {
+    riderId: rider._id,
+    deletedAt: null,
+    ...deliveryDateFilter,
+  };
+  if (req.query.status) deliveryFilter.status = req.query.status;
+
+  const runFilter: Record<string, unknown> = {
+    riderId: rider._id,
+    status: { $ne: "cancelled" },
+    ...runDateFilter,
+  };
+
+  const [deliveries, total, runs, statusCounts] = await Promise.all([
+    Delivery.find(deliveryFilter)
+      .populate("customerId", "name phone address area")
+      .populate("saleId", "saleNumber quantity totalAmount")
+      .populate("branchId", "name code")
+      .sort({ scheduledDate: -1, routeOrder: 1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Delivery.countDocuments(deliveryFilter),
+    DeliveryRun.find(runFilter).select("totalDistanceMeters status runNumber scheduledDate stops").lean(),
+    Delivery.aggregate<{ _id: string; count: number }>([
+      { $match: { riderId: rider._id, deletedAt: null, ...deliveryDateFilter } },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]),
+  ]);
+
+  const totalDistanceMeters = runs.reduce((sum, run) => sum + (run.totalDistanceMeters ?? 0), 0);
+  const totalDistanceKm = totalDistanceMeters / 1000;
+  const fuelLitersConsumed = totalDistanceKm / BIKE_KM_PER_LITER;
+
+  const byStatus = Object.fromEntries(statusCounts.map((row) => [row._id, row.count])) as Record<
+    string,
+    number
+  >;
+  const totalDeliveriesInRange = statusCounts.reduce((sum, row) => sum + row.count, 0);
+
+  return sendSuccess(
+    res,
+    {
+      rider,
+      dateFrom,
+      dateTo,
+      deliveries,
+      summary: {
+        totalDeliveries: totalDeliveriesInRange,
+        byStatus,
+        runCount: runs.length,
+        totalDistanceMeters,
+        totalDistanceKm: Math.round(totalDistanceKm * 100) / 100,
+        fuelLitersConsumed: Math.round(fuelLitersConsumed * 100) / 100,
+        kmPerLiter: BIKE_KM_PER_LITER,
+      },
+    },
+    200,
+    buildMeta(page, limit, total)
+  );
 }

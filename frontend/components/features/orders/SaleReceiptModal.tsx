@@ -3,6 +3,7 @@
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { ReceiptActions } from "@/components/features/orders/ReceiptActions";
+import { getSaleLineItems, saleProductLabel } from "@/lib/sale-items";
 import type { Sale } from "@/types/customer";
 
 function refName(ref: string | { name?: string; sku?: string } | undefined) {
@@ -25,6 +26,8 @@ interface SaleReceiptModalProps {
 export function SaleReceiptModal({ sale, open, onOpenChange, companyName }: SaleReceiptModalProps) {
   if (!sale) return null;
 
+  const lines = getSaleLineItems(sale);
+
   return (
     <Modal open={open} onOpenChange={onOpenChange} title="Sale Receipt" size="md">
       <div className="space-y-4">
@@ -35,7 +38,13 @@ export function SaleReceiptModal({ sale, open, onOpenChange, companyName }: Sale
 
         <div className="rounded-lg border border-border bg-muted/20 p-4 text-sm">
           <p className="font-medium">{refName(sale.customerId)}</p>
-          <p className="text-muted-foreground">{refName(sale.productId)} × {sale.quantity}</p>
+          <ul className="mt-2 space-y-1 text-muted-foreground">
+            {lines.map((line, index) => (
+              <li key={`${saleProductLabel(line.productId)}-${index}`}>
+                {saleProductLabel(line.productId)} × {line.quantity}
+              </li>
+            ))}
+          </ul>
           <p className="mt-2 text-lg font-bold">{formatAmount(sale.totalAmount)}</p>
           {sale.riderAssigned && sale.riderCode ? (
             <p className="mt-2 text-xs text-brand">

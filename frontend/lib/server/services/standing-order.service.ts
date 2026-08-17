@@ -60,6 +60,14 @@ export async function processStandingOrdersDue(input: {
       quantity: order.quantity,
       unitPrice,
       totalAmount: unitPrice * order.quantity,
+      items: [
+        {
+          productId: order.productId,
+          quantity: order.quantity,
+          unitPrice,
+          lineTotal: unitPrice * order.quantity,
+        },
+      ],
       soldBy: input.userId,
       notes: `Standing order (${order.frequency})`,
     });

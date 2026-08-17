@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Eye, Megaphone, Pencil, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SearchBar } from "@/components/common/SearchBar";
@@ -14,10 +14,9 @@ import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
-import { BranchSubBranchSelect } from "@/components/common/BranchSubBranchSelect";
 import { Select } from "@/components/ui/Select";
-import { resolveMainAndSubBranchId } from "@/lib/branch-utils";
 import { ProductImage } from "@/components/features/products/ProductImage";
+import { ProductAdModal } from "@/components/features/products/ProductAdModal";
 import { useAuth, useBranch } from "@/hooks";
 import { usePermissions } from "@/hooks/usePermissions";
 import { productApi } from "@/lib/api/products";
@@ -45,12 +44,11 @@ const emptyForm = {
   reorderLevel: "0",
   status: "active",
   sku: "",
-  initialQty: "",
 };
 
 export function ProductsPage() {
   const { user } = useAuth();
-  const { branches, activeBranchId } = useBranch();
+  const { branches } = useBranch();
   const { can } = usePermissions();
   const qc = useQueryClient();
 
@@ -62,10 +60,11 @@ export function ProductsPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [selected, setSelected] = useState<Product | null>(null);
   const [form, setForm] = useState(emptyForm);
-  const [branchId, setBranchId] = useState(activeBranchId ?? "");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [formImages, setFormImages] = useState<string[]>([]);
+  const [adOpen, setAdOpen] = useState(false);
+  const [adProduct, setAdProduct] = useState<Product | null>(null);
 
   const companyId = user?.companyId ?? branches[0]?.companyId ?? "";
 
@@ -93,17 +92,13 @@ export function ProductsPage() {
     subCategory: form.subCategory || undefined,
     brand: form.brand || undefined,
     supplierId: form.supplierId || undefined,
-    description: form.description || undefined,
+    description: form.description.trim(),
     purchaseCost: form.purchaseCost ? Number(form.purchaseCost) : undefined,
     sellingPrice: form.sellingPrice ? Number(form.sellingPrice) : undefined,
     unitOfMeasure: form.unitOfMeasure,
     minStockLevel: Number(form.minStockLevel) || 0,
     reorderLevel: Number(form.reorderLevel) || 0,
     status: form.status as Product["status"],
-    initialStock:
-      branchId && form.initialQty
-        ? { branchId, quantity: Number(form.initialQty) }
-        : undefined,
   });
 
   const { data, isLoading, refetch } = useQuery({
@@ -139,6 +134,11 @@ export function ProductsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const openCreateAd = (product: Product) => {
+    setAdProduct(product);
+    setAdOpen(true);
+  };
+
   const updateMut = useMutation({
     mutationFn: async () => {
       const product = await productApi.update(selected!._id, {
@@ -148,7 +148,7 @@ export function ProductsPage() {
         subCategory: form.subCategory || undefined,
         brand: form.brand || undefined,
         supplierId: form.supplierId || undefined,
-        description: form.description || undefined,
+        description: form.description.trim(),
         purchaseCost: form.purchaseCost ? Number(form.purchaseCost) : undefined,
         sellingPrice: form.sellingPrice ? Number(form.sellingPrice) : undefined,
         unitOfMeasure: form.unitOfMeasure,
@@ -210,7 +210,6 @@ export function ProductsPage() {
       reorderLevel: String(p.reorderLevel),
       status: p.status,
       sku: p.sku,
-      initialQty: "",
     });
     setFormOpen(true);
   };
@@ -245,6 +244,11 @@ export function ProductsPage() {
             <Button variant="ghost" size="icon" onClick={() => void openDetail(r)}><Eye className="h-4 w-4" /></Button>
             {can("product:edit") ? (
               <Button variant="ghost" size="icon" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button>
+            ) : null}
+            {can("product:create") ? (
+              <Button variant="ghost" size="icon" title="Create Ad" onClick={() => openCreateAd(r)}>
+                <Megaphone className="h-4 w-4" />
+              </Button>
             ) : null}
             {can("product:delete") ? (
               <Button variant="ghost" size="icon" onClick={() => { setSelected(r); setDeleteOpen(true); }}><Trash2 className="h-4 w-4" /></Button>
@@ -302,25 +306,17 @@ export function ProductsPage() {
           <div><Label>Selling Price (OMR)</Label><Input type="number" value={form.sellingPrice} onChange={(e) => setForm({ ...form, sellingPrice: e.target.value })} /></div>
           <div><Label>Min Stock</Label><Input type="number" value={form.minStockLevel} onChange={(e) => setForm({ ...form, minStockLevel: e.target.value })} /></div>
           <div><Label>Reorder Level</Label><Input type="number" value={form.reorderLevel} onChange={(e) => setForm({ ...form, reorderLevel: e.target.value })} /></div>
-          {!selected ? (
-            <>
-              <div className="sm:col-span-2">
-                <Label>Initial Branch</Label>
-                <BranchSubBranchSelect
-                  branches={branches}
-                  mainBranchId={resolveMainAndSubBranchId(branchId, branches).mainId}
-                  subBranchId={resolveMainAndSubBranchId(branchId, branches).subId}
-                  onMainBranchChange={(id) => setBranchId(id)}
-                  onSubBranchChange={(id) => {
-                    const mainId = resolveMainAndSubBranchId(branchId, branches).mainId;
-                    setBranchId(id || mainId);
-                  }}
-                />
-              </div>
-              <div><Label>Initial Qty</Label><Input type="number" value={form.initialQty} onChange={(e) => setForm({ ...form, initialQty: e.target.value })} /></div>
-            </>
-          ) : null}
-          <div className="sm:col-span-2"><Label>Description</Label><Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
+          <div className="sm:col-span-2">
+            <Label>Description *</Label>
+            <textarea
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              rows={4}
+              placeholder="Describe the product for customers (required)"
+              className="mt-0 w-full rounded-lg border border-border bg-card px-3 py-2.5 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-brand focus:ring-2 focus:ring-brand-muted"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">Shown on the store product page. Min 10 characters.</p>
+          </div>
 
           <div className="sm:col-span-2 space-y-3">
             <Label>Product Image</Label>
@@ -375,11 +371,22 @@ export function ProductsPage() {
             ) : null}
           </div>
         </div>
-        <div className="mt-6 flex justify-end gap-2">
+        <div className="mt-6 flex flex-wrap items-center justify-end gap-2">
           <Button variant="secondary" onClick={() => setFormOpen(false)}>Cancel</Button>
           <Button
-            disabled={!form.name || createMut.isPending || updateMut.isPending}
-            onClick={() => (selected ? updateMut.mutate() : createMut.mutate())}
+            disabled={
+              !form.name ||
+              form.description.trim().length < 10 ||
+              createMut.isPending ||
+              updateMut.isPending
+            }
+            onClick={() => {
+              if (form.description.trim().length < 10) {
+                toast.error("Product description is required (min 10 characters)");
+                return;
+              }
+              selected ? updateMut.mutate() : createMut.mutate();
+            }}
           >
             {selected ? "Save" : "Create"}
           </Button>
@@ -418,9 +425,27 @@ export function ProductsPage() {
                 </div>
               </div>
             ) : null}
+            {can("product:create") ? (
+              <div className="flex justify-end pt-2">
+                <Button onClick={() => openCreateAd(selected)}>
+                  <Megaphone className="mr-2 h-4 w-4" />
+                  Create Ad
+                </Button>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </Modal>
+
+      <ProductAdModal
+        open={adOpen}
+        onOpenChange={(open) => {
+          setAdOpen(open);
+          if (!open) setAdProduct(null);
+        }}
+        product={adProduct}
+        companyId={companyId}
+      />
 
       <ConfirmationModal
         open={deleteOpen}

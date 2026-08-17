@@ -2,11 +2,14 @@
   "name": "noor-erp",
   "version": "0.1.0",
   "private": true,
-  "description": "NOOR ERP — Next.js full-stack app with MongoDB",
+  "description": "NOOR ERP — Next.js full-stack app with MongoDB + separate customer store frontend",
   "scripts": {
     "dev": "npm run dev --prefix frontend",
+    "dev:store": "npm run dev --prefix store",
     "build": "npm run build --prefix frontend",
+    "build:store": "npm run build --prefix store",
     "start": "npm run start --prefix frontend",
+    "start:store": "npm run start --prefix store",
     "lint": "npm run lint --prefix frontend",
     "seed": "npm run seed --prefix frontend",
     "reset-admin": "npm run reset-admin --prefix frontend"

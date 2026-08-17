@@ -49,17 +49,26 @@ function buildDeliveryNoteDoc(delivery: Delivery, companyName: string) {
     doc.setFont("helvetica", "bold");
     doc.text("Order Details", 14, y);
     y += 6;
+    const items =
+      sale.items && sale.items.length > 0
+        ? sale.items.map((line) => [
+            sale.saleNumber,
+            typeof line.productId === "object" ? line.productId?.name ?? "—" : "—",
+            String(line.quantity),
+            pdfFormatAmount(line.lineTotal ?? line.unitPrice * line.quantity),
+          ])
+        : [
+            [
+              sale.saleNumber,
+              typeof sale.productId === "object" ? sale.productId?.name ?? "—" : "—",
+              String(sale.quantity),
+              pdfFormatAmount(sale.totalAmount),
+            ],
+          ];
     autoTable(doc, {
       startY: y,
       head: [["Sale #", "Product", "Qty", "Amount"]],
-      body: [
-        [
-          sale.saleNumber,
-          typeof sale.productId === "object" ? sale.productId?.name ?? "—" : "—",
-          String(sale.quantity),
-          pdfFormatAmount(sale.totalAmount),
-        ],
-      ],
+      body: items,
       theme: "grid",
       styles: { fontSize: 9 },
       headStyles: { fillColor: [16, 185, 129] },

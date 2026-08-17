@@ -7,6 +7,7 @@ export const ROLES = [
   "procurement_manager",
   "rider",
   "employee",
+  "customer",
 ] as const;
 
 export type UserRole = (typeof ROLES)[number];
@@ -180,4 +181,5 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     "performance:view",
     "notification:view",
   ],
+  customer: ["product:view", "customer:view"],
 };

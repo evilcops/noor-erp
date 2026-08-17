@@ -12,7 +12,7 @@ export { Notification, type INotification } from "./Notification.model";
 export { BusinessDocument, type IBusinessDocument } from "./BusinessDocument.model";
 export { BranchDocument, type IBranchDocument } from "./BranchDocument.model";
 export { Customer, type ICustomer } from "./Customer.model";
-export { Sale, type ISale } from "./Sale.model";
+export { Sale, type ISale, type ISaleItem } from "./Sale.model";
 export { GoodsReceivedNote, type IGoodsReceivedNote } from "./GoodsReceivedNote.model";
 export { Product, type IProduct, type ProductStatus } from "./Product.model";
 export { PurchaseOrder, type IPurchaseOrder, type PurchaseStatus } from "./PurchaseOrder.model";
@@ -32,3 +32,8 @@ export {
   type OrderSource,
 } from "./Delivery.model";
 export { RiderJourney, type IRiderJourney, type JourneyStatus } from "./RiderJourney.model";
+export {
+  RefusedItem,
+  type IRefusedItem,
+  type RefusedItemStatus,
+} from "./RefusedItem.model";
