@@ -6,6 +6,9 @@ const OSRM_BASE = "https://router.project-osrm.org";
 /** Round-trip route cost (PKR per km) — warehouse → stops → warehouse */
 export const ROUTE_COST_PER_KM = 10;
 
+/** Estimated bike fuel efficiency used for rider history fuel totals. */
+export const BIKE_KM_PER_LITER = 45;
+
 export interface RouteStop {
   id: string;
   lat: number;

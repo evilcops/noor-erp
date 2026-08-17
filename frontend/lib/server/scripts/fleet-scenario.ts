@@ -222,6 +222,14 @@ async function placeOrder(
     quantity: 1,
     unitPrice: opts.value,
     totalAmount: opts.value,
+    items: [
+      {
+        productId: ctx.productId,
+        quantity: 1,
+        unitPrice: opts.value,
+        lineTotal: opts.value,
+      },
+    ],
     soldBy: ctx.userId,
   });
 

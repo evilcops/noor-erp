@@ -2,13 +2,16 @@ import {
   Briefcase,
   Building2,
   Calendar,
+  ClipboardList,
   Clock,
   Contact,
   GitBranch,
+  History,
   Home,
   Layers,
   MapPin,
   Package,
+  PackageX,
   Settings,
   Shield,
   ShoppingCart,
@@ -51,8 +54,10 @@ export const MAIN_NAV: NavItem[] = [
 
 export const SUPPLY_NAV: NavItem[] = [
   { title: "Supply Dashboard", href: "/supply", icon: Warehouse, permission: "inventory:view" },
+  { title: "App Orders", href: "/app-orders", icon: ClipboardList, permission: "inventory:view" },
   { title: "Products", href: "/products", icon: Package, permission: "product:view" },
   { title: "Inventory", href: "/inventory", icon: Package, permission: "inventory:view" },
+  { title: "Refused Items", href: "/refused-items", icon: PackageX, permission: "inventory:view" },
   { title: "Customers", href: "/customers", icon: Contact, permission: "customer:view" },
   { title: "Suppliers", href: "/suppliers", icon: Truck, permission: "supplier:view" },
   { title: "Purchase Orders", href: "/purchases", icon: ShoppingCart, permission: "purchase:view" },
@@ -64,6 +69,7 @@ export const RIDERS_NAV: NavItem[] = [
   { title: "Deliveries", href: "/deliveries", icon: Package, permission: "delivery:assign" },
   { title: "Clusters", href: "/clusters", icon: Layers, permission: "delivery:assign" },
   { title: "Location", href: "/riders/location", icon: MapPin, permission: "rider:view" },
+  { title: "History", href: "/riders/history", icon: History, permission: "rider:view" },
   { title: "Riders", href: "/riders", icon: Bike, permission: "rider:view" },
   {
     title: "My Deliveries",
@@ -96,6 +102,8 @@ export const ROUTE_PERMISSIONS: RoutePermissionRule[] = [
   { prefix: "/supply", permission: "inventory:view" },
   { prefix: "/products", permission: "product:view" },
   { prefix: "/inventory", permission: "inventory:view" },
+  { prefix: "/refused-items", permission: "inventory:view" },
+  { prefix: "/app-orders", permission: "inventory:view" },
   { prefix: "/customers", permission: "customer:view" },
   { prefix: "/suppliers", permission: "supplier:view" },
   { prefix: "/purchases", permission: "purchase:view" },
@@ -104,6 +112,7 @@ export const ROUTE_PERMISSIONS: RoutePermissionRule[] = [
   { prefix: "/deliveries", permission: "delivery:assign" },
   { prefix: "/clusters", permission: "delivery:assign" },
   { prefix: "/riders/location", permission: "rider:view" },
+  { prefix: "/riders/history", permission: "rider:view" },
   { prefix: "/riders", permission: "rider:view", roles: ["rider"] },
   { prefix: "/documents", permission: "employee:view" },
   { prefix: "/notifications", permission: "notification:view" },
@@ -133,6 +142,9 @@ export function canAccessRoute(
 ): boolean {
   if (userRole === "rider") {
     return isRiderAllowedPath(pathname);
+  }
+  if (userRole === "customer") {
+    return pathname === "/store" || pathname.startsWith("/store/");
   }
 
   const rule = getRoutePermissionRule(pathname);

@@ -50,6 +50,7 @@ const ROLE_PERMISSIONS: Record<ApiUser["role"], string[]> = {
     "employee:view", "attendance:create", "attendance:view", "leave:create", "leave:view",
     "performance:view", "notification:view",
   ],
+  customer: ["product:view", "customer:view"],
 };
 
 export function getEffectivePermissions(user: ApiUser | null): string[] {

@@ -308,6 +308,7 @@ export async function getCustomer(req: Request, res: Response) {
 
   const sales = await Sale.find({ customerId: customer._id })
     .populate("productId", "name sku code unitOfMeasure images")
+    .populate("items.productId", "name sku code unitOfMeasure images")
     .populate("branchId", "name code")
     .populate("soldBy", "firstName lastName")
     .sort({ createdAt: -1 })
@@ -398,21 +399,72 @@ export async function recordSale(req: Request, res: Response) {
     branchId: req.body.branchId,
   });
 
-  const product = await Product.findOne({ _id: req.body.productId, deletedAt: null });
-  if (!product) throw new AppError("NOT_FOUND", "Product not found", 404);
+  type RawItem = { productId: string; quantity: number; unitPrice?: number };
+  const rawItems: RawItem[] =
+    Array.isArray(req.body.items) && req.body.items.length > 0
+      ? req.body.items
+      : [
+          {
+            productId: String(req.body.productId),
+            quantity: Number(req.body.quantity),
+            unitPrice: req.body.unitPrice,
+          },
+        ];
 
-  const stock = await StockLevel.findOne({
-    companyId,
-    branchId,
-    productId: req.body.productId,
-  });
-
-  if (!stock || stock.currentStock < req.body.quantity) {
-    throw new AppError("BAD_REQUEST", "Insufficient stock for this sale", 400);
+  if (rawItems.length === 0) {
+    throw new AppError("BAD_REQUEST", "At least one product is required", 400);
   }
 
-  const unitPrice = req.body.unitPrice ?? product.sellingPrice ?? 0;
-  const totalAmount = unitPrice * req.body.quantity;
+  const merged = new Map<string, RawItem>();
+  for (const item of rawItems) {
+    const key = String(item.productId);
+    const existing = merged.get(key);
+    if (existing) {
+      existing.quantity += item.quantity;
+      if (item.unitPrice != null) existing.unitPrice = item.unitPrice;
+    } else {
+      merged.set(key, { ...item, productId: key });
+    }
+  }
+  const uniqueItems = [...merged.values()];
+
+  const lineItems: {
+    product: InstanceType<typeof Product>;
+    quantity: number;
+    unitPrice: number;
+    lineTotal: number;
+  }[] = [];
+
+  for (const item of uniqueItems) {
+    const product = await Product.findOne({ _id: item.productId, deletedAt: null });
+    if (!product) throw new AppError("NOT_FOUND", `Product not found: ${item.productId}`, 404);
+
+    const stock = await StockLevel.findOne({
+      companyId,
+      branchId,
+      productId: item.productId,
+    });
+
+    if (!stock || stock.currentStock < item.quantity) {
+      throw new AppError(
+        "BAD_REQUEST",
+        `Insufficient stock for ${product.name} (need ${item.quantity}, have ${stock?.currentStock ?? 0})`,
+        400
+      );
+    }
+
+    const unitPrice = item.unitPrice ?? product.sellingPrice ?? 0;
+    lineItems.push({
+      product,
+      quantity: item.quantity,
+      unitPrice,
+      lineTotal: unitPrice * item.quantity,
+    });
+  }
+
+  const totalQuantity = lineItems.reduce((sum, line) => sum + line.quantity, 0);
+  const totalAmount = lineItems.reduce((sum, line) => sum + line.lineTotal, 0);
+  const primary = lineItems[0];
 
   let customer;
   const customerId = req.body.customerId;
@@ -446,55 +498,79 @@ export async function recordSale(req: Request, res: Response) {
     companyId,
     branchId,
     customerId: customer._id,
-    productId: product._id,
+    productId: primary.product._id,
     saleNumber,
-    quantity: req.body.quantity,
-    unitPrice,
+    quantity: totalQuantity,
+    unitPrice: primary.unitPrice,
     totalAmount,
+    items: lineItems.map((line) => ({
+      productId: line.product._id,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      lineTotal: line.lineTotal,
+    })),
     soldBy: req.user!._id,
     notes: req.body.notes,
   });
 
-  const updatedStock = await updateStockLevel({
-    companyId: product.companyId,
-    branchId,
-    productId: product._id,
-    quantity: -req.body.quantity,
-    type: "sale",
-    reason: `Sale ${saleNumber} to ${customer.phone}`,
-    referenceType: "Sale",
-    referenceId: sale._id,
-    userId: req.user!._id,
-  });
+  for (const line of lineItems) {
+    try {
+      const updatedStock = await updateStockLevel({
+        companyId,
+        branchId,
+        productId: line.product._id,
+        quantity: -line.quantity,
+        type: "sale",
+        reason: `Sale ${saleNumber} to ${customer.phone}`,
+        referenceType: "Sale",
+        referenceId: sale._id,
+        userId: req.user!._id,
+      });
 
-  await syncProductStockStatus(product._id);
+      await syncProductStockStatus(line.product._id);
 
-  const reorderLevel = updatedStock.reorderLevel ?? product.reorderLevel ?? 0;
-  if (updatedStock.currentStock <= reorderLevel && reorderLevel > 0) {
-    const branch = await Branch.findById(branchId).select("name");
-    await notifyLowStock(
-      product.companyId,
-      product.name,
-      branch?.name ?? "Branch",
-      updatedStock.currentStock,
-      reorderLevel
-    );
+      const reorderLevel = updatedStock.reorderLevel ?? line.product.reorderLevel ?? 0;
+      if (updatedStock.currentStock <= reorderLevel && reorderLevel > 0) {
+        const branch = await Branch.findById(branchId).select("name");
+        await notifyLowStock(
+          companyId,
+          line.product.name,
+          branch?.name ?? "Branch",
+          updatedStock.currentStock,
+          reorderLevel
+        );
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update stock";
+      throw new AppError("BAD_REQUEST", message, 400);
+    }
   }
 
-  const populated = await Sale.findById(sale._id)
+  let populatedQuery = Sale.findById(sale._id)
     .populate("productId", "name sku")
     .populate("customerId", "name phone email address area")
-    .populate("branchId", "name")
-    .lean();
+    .populate("branchId", "name");
 
-  const delivery = await createDeliveryFromSale(sale, customer, String(req.user!._id), {
-    promisedWindowStart: req.body.promisedWindowStart
-      ? new Date(req.body.promisedWindowStart)
-      : undefined,
-    promisedWindowEnd: req.body.promisedWindowEnd
-      ? new Date(req.body.promisedWindowEnd)
-      : undefined,
-  });
+  if (Sale.schema.path("items")) {
+    populatedQuery = populatedQuery.populate("items.productId", "name sku");
+  }
+
+  const populated = await populatedQuery.lean();
+
+  let delivery;
+  try {
+    delivery = await createDeliveryFromSale(sale, customer, String(req.user!._id), {
+      promisedWindowStart: req.body.promisedWindowStart
+        ? new Date(req.body.promisedWindowStart)
+        : undefined,
+      promisedWindowEnd: req.body.promisedWindowEnd
+        ? new Date(req.body.promisedWindowEnd)
+        : undefined,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to create delivery";
+    throw new AppError("INTERNAL_ERROR", `Sale saved but delivery failed: ${message}`, 500);
+  }
 
   const rider = delivery?.riderId;
   const riderCode =
@@ -515,6 +591,7 @@ export async function getSale(req: Request, res: Response) {
   const tenant = buildTenantFilter(req.user!);
   const sale = await Sale.findOne({ _id: req.params.id, ...tenant })
     .populate("productId", "name sku code unitOfMeasure images")
+    .populate("items.productId", "name sku code unitOfMeasure images")
     .populate("customerId", "name phone email")
     .populate("branchId", "name code")
     .populate("soldBy", "firstName lastName")

@@ -9,7 +9,8 @@
     "lint": "eslint",
     "seed": "tsx --env-file=.env lib/server/scripts/seed.ts",
     "reset-admin": "tsx --env-file=.env lib/server/scripts/reset-admin.ts",
-    "fleet-scenario": "tsx --env-file=.env lib/server/scripts/fleet-scenario.ts"
+    "fleet-scenario": "tsx --env-file=.env lib/server/scripts/fleet-scenario.ts",
+    "seed-raya": "echo Use POST /api/dev/seed-raya-products while npm run dev is up"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.12",

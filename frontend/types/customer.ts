@@ -38,6 +38,13 @@ export interface ResolveClusterResult {
   branch: { _id: string; name?: string; code?: string } | null;
 }
 
+export interface SaleItem {
+  productId: string | { _id: string; name: string; sku: string; code?: string; unitOfMeasure?: string; images?: string[] };
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+}
+
 export interface Sale {
   _id: string;
   companyId: string;
@@ -48,6 +55,7 @@ export interface Sale {
   quantity: number;
   unitPrice: number;
   totalAmount: number;
+  items?: SaleItem[];
   soldBy?: { firstName: string; lastName: string };
   notes?: string;
   createdAt: string;
@@ -61,11 +69,20 @@ export interface CustomerDetail extends Customer {
   sales: Sale[];
 }
 
+export interface RecordSaleItemInput {
+  productId: string;
+  quantity: number;
+  unitPrice?: number;
+}
+
 export interface RecordSaleInput {
   companyId: string;
   branchId: string;
-  productId: string;
-  quantity: number;
+  /** Preferred for multi-product cart sales. */
+  items?: RecordSaleItemInput[];
+  /** Legacy single-product fields. */
+  productId?: string;
+  quantity?: number;
   customerId?: string;
   customerPhone?: string;
   customerEmail?: string;

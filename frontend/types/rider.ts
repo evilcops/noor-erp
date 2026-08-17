@@ -95,6 +95,24 @@ export interface RiderLocationsResult {
   riders: RiderLocationSnapshot[];
 }
 
+export interface RiderHistorySummary {
+  totalDeliveries: number;
+  byStatus: Record<string, number>;
+  runCount: number;
+  totalDistanceMeters: number;
+  totalDistanceKm: number;
+  fuelLitersConsumed: number;
+  kmPerLiter: number;
+}
+
+export interface RiderHistoryResult {
+  rider: Rider;
+  dateFrom: string;
+  dateTo: string;
+  deliveries: import("./delivery").Delivery[];
+  summary: RiderHistorySummary;
+}
+
 export interface RiderRoutePlan {
   warehouse: { lat: number; lng: number; label?: string };
   pathGeometry: { lat: number; lng: number }[];

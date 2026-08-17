@@ -39,6 +39,12 @@ export interface Delivery {
     quantity: number;
     totalAmount: number;
     productId?: { name: string; sku: string };
+    items?: {
+      productId?: string | { name?: string; sku?: string };
+      quantity: number;
+      unitPrice: number;
+      lineTotal: number;
+    }[];
   };
   customerId: string | {
     _id: string;

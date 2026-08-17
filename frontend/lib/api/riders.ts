@@ -1,5 +1,11 @@
 import { apiRequest, apiRequestWithMeta } from "./client";
-import type { Rider, RiderDetail, LiveRider, RiderLocationSnapshot, RiderLocationsResult } from "@/types/rider";
+import type {
+  Rider,
+  RiderDetail,
+  LiveRider,
+  RiderLocationsResult,
+  RiderHistoryResult,
+} from "@/types/rider";
 
 export const riderApi = {
   list: (params?: { page?: number; limit?: number; search?: string; status?: string; branchId?: string }) => {
@@ -14,6 +20,20 @@ export const riderApi = {
   },
 
   get: (id: string) => apiRequest<RiderDetail>(`/riders/${id}`),
+
+  history: (
+    id: string,
+    params?: { page?: number; limit?: number; status?: string; dateFrom?: string; dateTo?: string }
+  ) => {
+    const q = new URLSearchParams();
+    if (params?.page) q.set("page", String(params.page));
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.status) q.set("status", params.status);
+    if (params?.dateFrom) q.set("dateFrom", params.dateFrom);
+    if (params?.dateTo) q.set("dateTo", params.dateTo);
+    const qs = q.toString();
+    return apiRequestWithMeta<RiderHistoryResult>(`/riders/${id}/history${qs ? `?${qs}` : ""}`);
+  },
 
   update: (id: string, data: Partial<Pick<Rider, "status" | "vehicleMake" | "vehicleModel" | "vehiclePlate" | "whatsappPhone">>) =>
     apiRequest<Rider>(`/riders/${id}`, { method: "PUT", body: JSON.stringify(data) }),

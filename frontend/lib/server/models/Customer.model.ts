@@ -13,6 +13,8 @@ export interface ICustomer extends Document {
   clusterId?: mongoose.Types.ObjectId | null;
   /** Main branch whose cluster grid covers this customer */
   branchId?: mongoose.Types.ObjectId | null;
+  /** Linked login user for storefront customers */
+  userId?: mongoose.Types.ObjectId | null;
   notes?: string;
   createdBy?: mongoose.Types.ObjectId;
   updatedBy?: mongoose.Types.ObjectId;
@@ -32,6 +34,7 @@ const customerSchema = new Schema<ICustomer>(
     coordinates: { lat: Number, lng: Number },
     clusterId: { type: Schema.Types.ObjectId, ref: "DeliveryCluster", default: null, index: true },
     branchId: { type: Schema.Types.ObjectId, ref: "Branch", default: null, index: true },
+    userId: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
     notes: String,
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
     updatedBy: { type: Schema.Types.ObjectId, ref: "User" },
@@ -42,5 +45,8 @@ const customerSchema = new Schema<ICustomer>(
 customerSchema.index({ companyId: 1, phone: 1 });
 customerSchema.plugin(softDeletePlugin);
 
-export const Customer: Model<ICustomer> =
-  mongoose.models.Customer ?? mongoose.model<ICustomer>("Customer", customerSchema);
+if (mongoose.models.Customer) {
+  mongoose.deleteModel("Customer");
+}
+
+export const Customer: Model<ICustomer> = mongoose.model<ICustomer>("Customer", customerSchema);

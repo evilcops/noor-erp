@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
-const PUBLIC_PATHS = ["/login", "/register"];
+const PUBLIC_PATHS = ["/login", "/register", "/store"];
 const AUTH_PATHS = ["/login", "/register"];
+const STORE_AUTH_PATHS = ["/store/login", "/store/register"];
+const STORE_APP_URL = process.env.NEXT_PUBLIC_STORE_URL ?? "http://localhost:3001";
 
 function getSecrets(): Uint8Array[] {
   return [
@@ -43,6 +45,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  const isStorePath = pathname === "/store" || pathname.startsWith("/store/");
   const isPublic = PUBLIC_PATHS.some(
     (path) => pathname === path || pathname.startsWith(`${path}/`)
   );
@@ -61,9 +64,16 @@ export async function middleware(request: NextRequest) {
     : undefined;
   const tokenPayload = accessToken ? await verifyAccessToken(accessToken) : null;
   const isAuthenticated = Boolean(tokenPayload);
-  const homePath = tokenPayload?.role === "rider" ? "/riders" : "/";
+  const isCustomer = tokenPayload?.role === "customer";
+  const homePath = isCustomer ? STORE_APP_URL : tokenPayload?.role === "rider" ? "/riders" : "/";
 
-  if (AUTH_PATHS.includes(pathname) && isAuthenticated) {
+  // Customers use the dedicated store app — bounce them off the ERP UI.
+  if (isCustomer && !isStorePath) {
+    return NextResponse.redirect(STORE_APP_URL);
+  }
+
+  if ((AUTH_PATHS.includes(pathname) || STORE_AUTH_PATHS.includes(pathname)) && isAuthenticated) {
+    if (isCustomer) return NextResponse.redirect(STORE_APP_URL);
     return NextResponse.redirect(new URL(homePath, request.url));
   }
 

@@ -6,7 +6,8 @@ export type UserRole =
   | "inventory_manager"
   | "procurement_manager"
   | "rider"
-  | "employee";
+  | "employee"
+  | "customer";
 
 export type Resource =
   | "dashboard"

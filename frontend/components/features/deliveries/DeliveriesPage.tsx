@@ -24,6 +24,17 @@ function refName(ref: string | { name?: string; phone?: string; riderCode?: stri
   return ref.name ?? ref.phone ?? ref.riderCode ?? "—";
 }
 
+function riderDisplayName(rider: Delivery["riderId"]) {
+  if (!rider) return null;
+  if (typeof rider === "string") return rider;
+  const emp = rider.employeeId;
+  if (emp && typeof emp === "object") {
+    const name = [emp.firstName, emp.lastName].filter(Boolean).join(" ").trim();
+    if (name) return name;
+  }
+  return rider.riderCode ?? "—";
+}
+
 function formatSlot(d: Delivery) {
   if (!d.timeSlotStart || !d.timeSlotEnd) return "—";
   return `${new Date(d.timeSlotStart).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} – ${new Date(d.timeSlotEnd).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
@@ -40,7 +51,10 @@ export function DeliveriesPage() {
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignTarget, setAssignTarget] = useState<Delivery | null>(null);
   const [assignRiderId, setAssignRiderId] = useState("");
-  const scheduledDate = new Date().toISOString().slice(0, 10);
+  const scheduledDate = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
 
   const { data, isLoading } = useQuery({
     queryKey: ["deliveries", page, search, status],
@@ -144,7 +158,14 @@ export function DeliveriesPage() {
       header: "Rider",
       cell: (d) =>
         d.riderId ? (
-          <span className="font-mono text-xs">{refName(d.riderId)}</span>
+          <span className="text-sm">
+            <span className="font-medium">{riderDisplayName(d.riderId)}</span>
+            {typeof d.riderId === "object" && d.riderId.riderCode ? (
+              <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
+                {d.riderId.riderCode}
+              </span>
+            ) : null}
+          </span>
         ) : (
           <span className="text-xs text-amber-600">Unassigned</span>
         ),

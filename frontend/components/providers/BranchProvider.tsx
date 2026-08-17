@@ -86,7 +86,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
   );
 
   const refreshBranches = useCallback(async () => {
-    if (!user) {
+    if (!user || user.role === "customer") {
       setBranches([]);
       return;
     }

@@ -106,9 +106,20 @@ function handleError(err: unknown): NextResponse {
     );
   }
 
-  logger.error("Unhandled error", { error: err });
+  logger.error("Unhandled error", {
+    error: err instanceof Error ? { message: err.message, stack: err.stack, name: err.name } : err,
+  });
   return NextResponse.json(
-    { success: false, error: { code: "INTERNAL_ERROR", message: "Internal server error" } },
+    {
+      success: false,
+      error: {
+        code: "INTERNAL_ERROR",
+        message:
+          process.env.NODE_ENV === "development" && err instanceof Error
+            ? err.message
+            : "Internal server error",
+      },
+    },
     { status: 500 }
   );
 }

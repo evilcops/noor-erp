@@ -16,6 +16,8 @@ const INVENTORY_ROUTE_PREFIXES = [
   "/supply",
   "/products",
   "/inventory",
+  "/refused-items",
+  "/app-orders",
   "/customers",
   "/suppliers",
   "/purchases",
@@ -72,6 +74,7 @@ export function isRiderAllowedPath(pathname: string): boolean {
 
 export function getDefaultHomePath(role?: string): string {
   if (role === "rider") return "/riders";
+  if (role === "customer") return "/store";
   return "/";
 }
 

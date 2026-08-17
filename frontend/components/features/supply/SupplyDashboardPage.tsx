@@ -156,6 +156,7 @@ export function SupplyDashboardPage() {
               onSubBranchChange={setSubBranchFilter}
               allowAllMain
             />
+            <Link href="/app-orders"><Button variant="secondary">App Orders</Button></Link>
             <Link href="/products"><Button variant="secondary">Products</Button></Link>
             <Link href="/purchases"><Button>Purchase Orders</Button></Link>
           </div>

@@ -30,11 +30,24 @@ export async function geocodeAddress(address: string): Promise<GeoCoordinates | 
   if (!address.trim()) return null;
 
   const trimmed = address.trim();
-  const withCountry = /oman|muscat|salalah|sohar/i.test(trimmed) ? trimmed : `${trimmed}, Oman`;
+  const envCountry = (process.env.GEOCODE_COUNTRY || "").toLowerCase();
+  const isOman = /oman|muscat|salalah|sohar/i.test(trimmed) || envCountry === "om";
+  const isPakistan =
+    /pakistan|lahore|karachi|islamabad|rawalpindi|faisalabad|multan|raya/i.test(trimmed) ||
+    envCountry === "pk" ||
+    (!isOman && envCountry !== "om");
+
+  const countryLabel = isOman ? "Oman" : isPakistan ? "Pakistan" : "";
+  const countryCode = isOman ? "om" : isPakistan ? "pk" : undefined;
+  const withCountry =
+    countryLabel && !new RegExp(countryLabel, "i").test(trimmed)
+      ? `${trimmed}, ${countryLabel}`
+      : trimmed;
 
   const attempts = [
-    { q: withCountry, country: "om" },
+    { q: withCountry, country: countryCode },
     { q: withCountry, country: undefined },
+    { q: trimmed, country: countryCode },
     { q: trimmed, country: undefined },
   ];
 

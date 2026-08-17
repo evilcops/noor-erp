@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Modal } from "@/components/ui/Modal";
 import { ReceiptActions } from "@/components/features/orders/ReceiptActions";
 import { salesApi } from "@/lib/api/customers";
+import { getSaleLineItems, saleProductLabel, saleProductSku } from "@/lib/sale-items";
 
 function refName(ref: string | { name?: string; sku?: string; firstName?: string; lastName?: string } | undefined) {
   if (!ref || typeof ref === "string") return ref ?? "—";
@@ -33,6 +34,8 @@ export function SaleDetailModal({ saleId, open, onOpenChange }: SaleDetailModalP
     queryFn: () => salesApi.get(saleId!),
     enabled: !!saleId && open,
   });
+
+  const lines = sale ? getSaleLineItems(sale) : [];
 
   return (
     <Modal
@@ -67,30 +70,38 @@ export function SaleDetailModal({ saleId, open, onOpenChange }: SaleDetailModalP
             </div>
           </div>
 
-          <div className="rounded-lg border border-border">
+          <div className="overflow-hidden rounded-lg border border-border">
             <div className="border-b border-border px-4 py-3">
-              <p className="text-sm font-semibold">Order Item</p>
+              <p className="text-sm font-semibold">
+                Order Items ({lines.length})
+              </p>
             </div>
-            <div className="grid gap-3 px-4 py-4 sm:grid-cols-2">
-              <div>
-                <p className="text-xs text-muted-foreground">Product</p>
-                <p className="font-medium">{refName(sale.productId)}</p>
-                {typeof sale.productId === "object" ? (
-                  <p className="text-xs text-muted-foreground">SKU: {sale.productId.sku}</p>
-                ) : null}
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Quantity</p>
-                <p className="font-medium">{sale.quantity}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Unit Price</p>
-                <p className="font-medium">{formatAmount(sale.unitPrice)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Total</p>
-                <p className="text-lg font-bold">{formatAmount(sale.totalAmount)}</p>
-              </div>
+            <div className="divide-y divide-border">
+              {lines.map((line, index) => (
+                <div
+                  key={`${saleProductLabel(line.productId)}-${index}`}
+                  className="grid gap-2 px-4 py-3 sm:grid-cols-4"
+                >
+                  <div className="sm:col-span-2">
+                    <p className="font-medium">{saleProductLabel(line.productId)}</p>
+                    <p className="text-xs text-muted-foreground">SKU: {saleProductSku(line.productId)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Qty × Price</p>
+                    <p className="font-medium">
+                      {line.quantity} × {formatAmount(line.unitPrice)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Line total</p>
+                    <p className="font-medium">{formatAmount(line.lineTotal)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between border-t border-border bg-muted/30 px-4 py-3">
+              <p className="text-sm text-muted-foreground">Grand total</p>
+              <p className="text-lg font-bold">{formatAmount(sale.totalAmount)}</p>
             </div>
           </div>
 

@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { Sale } from "@/types/customer";
+import { getSaleLineItems, saleProductLabel, saleProductSku } from "@/lib/sale-items";
 import { openPdfForPrint, pdfFormatAmount, pdfFormatDate, pdfRefName } from "./receipt-utils";
 
 function buildSaleReceiptDoc(sale: Sale, companyName: string) {
@@ -49,13 +50,18 @@ function buildSaleReceiptDoc(sale: Sale, companyName: string) {
   y += 5;
   doc.text(pdfRefName(sale.branchId), 14, y);
 
-  const productName = pdfRefName(sale.productId);
-  const sku = typeof sale.productId === "object" ? sale.productId.sku : "—";
+  const lines = getSaleLineItems(sale);
 
   autoTable(doc, {
     startY: y + 8,
     head: [["Product", "SKU", "Qty", "Unit Price", "Total"]],
-    body: [[productName, sku, String(sale.quantity), pdfFormatAmount(sale.unitPrice), pdfFormatAmount(sale.totalAmount)]],
+    body: lines.map((line) => [
+      saleProductLabel(line.productId),
+      saleProductSku(line.productId),
+      String(line.quantity),
+      pdfFormatAmount(line.unitPrice),
+      pdfFormatAmount(line.lineTotal),
+    ]),
     theme: "grid",
     headStyles: { fillColor: [30, 64, 120], textColor: 255, fontStyle: "bold" },
     styles: { fontSize: 10, cellPadding: 3 },
