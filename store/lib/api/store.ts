@@ -134,9 +134,19 @@ export interface StoreOrderTrack {
     minutesRemaining?: number | null;
     travelTimeMinutes?: number | null;
   };
+  canChangeAddress?: boolean;
 }
 
 export const storeApi = {
+  searchAddresses: (q: string, near?: { lat?: number; lng?: number } | null) =>
+    apiRequest<{ label: string; lat: number; lng: number }[]>(
+      `/geocode/search${buildQuery({
+        q,
+        lat: near?.lat,
+        lng: near?.lng,
+      })}`
+    ),
+
   branches: () => apiRequest<StoreBranch[]>("/store/branches"),
 
   resolveLocation: (data: {
@@ -213,4 +223,21 @@ export const storeApi = {
     ),
 
   trackOrder: (id: string) => apiRequest<StoreOrderTrack>(`/store/orders/${id}/track`),
+
+  updateOrderAddress: (
+    id: string,
+    data: {
+      address: string;
+      area?: string;
+      lat?: number;
+      lng?: number;
+      coordinates?: { lat: number; lng: number };
+    }
+  ) =>
+    apiRequest<{
+      deliveryAddress: string;
+      area?: string;
+      coordinates?: { lat: number; lng: number };
+      status: string;
+    }>(`/store/orders/${id}/address`, { method: "PATCH", body: JSON.stringify(data) }),
 };

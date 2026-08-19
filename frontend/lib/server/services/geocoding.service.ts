@@ -6,24 +6,100 @@ export interface GeoCoordinates {
   lng: number;
 }
 
-async function searchNominatim(q: string, countrycodes?: string): Promise<GeoCoordinates | null> {
+export interface AddressSuggestion {
+  label: string;
+  lat: number;
+  lng: number;
+}
+
+type NominatimHit = {
+  lat: string;
+  lon: string;
+  display_name?: string;
+};
+
+async function nominatimSearch(
+  q: string,
+  options: { countrycodes?: string; limit?: number; viewbox?: string } = {}
+): Promise<NominatimHit[]> {
   const params = new URLSearchParams({
     q,
     format: "json",
-    limit: "1",
+    limit: String(options.limit ?? 1),
+    addressdetails: "0",
   });
-  if (countrycodes) params.set("countrycodes", countrycodes);
+  if (options.countrycodes) params.set("countrycodes", options.countrycodes);
+  if (options.viewbox) {
+    params.set("viewbox", options.viewbox);
+    params.set("bounded", "0");
+  }
 
   const res = await fetch(`${NOMINATIM_BASE}/search?${params}`, {
     headers: { "User-Agent": USER_AGENT },
     signal: AbortSignal.timeout(8000),
   });
+  if (!res.ok) return [];
+  const data = (await res.json()) as NominatimHit[];
+  return Array.isArray(data) ? data : [];
+}
 
-  if (!res.ok) return null;
-  const data = (await res.json()) as { lat: string; lon: string }[];
+async function searchNominatim(q: string, countrycodes?: string): Promise<GeoCoordinates | null> {
+  const data = await nominatimSearch(q, { countrycodes, limit: 1 });
   if (!data.length) return null;
-
   return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+}
+
+function inferCountry(query: string) {
+  const envCountry = (process.env.GEOCODE_COUNTRY || "").toLowerCase();
+  const isOman = /oman|muscat|salalah|sohar/i.test(query) || envCountry === "om";
+  const isPakistan =
+    /pakistan|lahore|karachi|islamabad|rawalpindi|faisalabad|multan|raya/i.test(query) ||
+    envCountry === "pk" ||
+    (!isOman && envCountry !== "om");
+  return {
+    label: isOman ? "Oman" : isPakistan ? "Pakistan" : "",
+    code: isOman ? "om" : isPakistan ? "pk" : undefined,
+  };
+}
+
+export async function searchAddresses(
+  query: string,
+  near?: { lat: number; lng: number } | null
+): Promise<AddressSuggestion[]> {
+  const trimmed = query.trim();
+  if (trimmed.length < 3) return [];
+
+  const country = inferCountry(trimmed);
+  const withCountry =
+    country.label && !new RegExp(country.label, "i").test(trimmed)
+      ? `${trimmed}, ${country.label}`
+      : trimmed;
+
+  const viewbox =
+    near?.lat != null && near?.lng != null
+      ? `${near.lng - 0.18},${near.lat + 0.18},${near.lng + 0.18},${near.lat - 0.18}`
+      : undefined;
+
+  const hits = await nominatimSearch(withCountry, {
+    countrycodes: country.code,
+    limit: 6,
+    viewbox,
+  });
+  const fallback =
+    hits.length > 0 ? hits : await nominatimSearch(trimmed, { limit: 6, viewbox });
+
+  const seen = new Set<string>();
+  const results: AddressSuggestion[] = [];
+  for (const hit of fallback) {
+    const lat = parseFloat(hit.lat);
+    const lng = parseFloat(hit.lon);
+    const label = (hit.display_name || trimmed).trim();
+    const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || seen.has(key)) continue;
+    seen.add(key);
+    results.push({ label, lat, lng });
+  }
+  return results;
 }
 
 export async function geocodeAddress(address: string): Promise<GeoCoordinates | null> {

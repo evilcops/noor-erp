@@ -89,8 +89,14 @@ export default function CheckoutPage() {
       <form onSubmit={onSubmit} className="rounded-[2rem] border border-black/5 bg-white p-5 sm:p-6">
         <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold">Checkout</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          Delivering from {location?.branchName || "your branch"}
+          Delivering from {location?.branchName || "your branch"}. You can change the drop-off address before placing the order.
         </p>
+        <Link
+          href="/location?from=/checkout"
+          className="mt-3 inline-flex text-sm font-bold text-[var(--forest)]"
+        >
+          Change delivery pin on map
+        </Link>
         <div className="mt-5 space-y-3">
           <label className="block text-sm font-semibold">
             Name

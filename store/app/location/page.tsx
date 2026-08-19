@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, MapPinned } from "lucide-react";
 import { toast } from "sonner";
 import { storeApi } from "@/lib/api/store";
+import { AddressSearchField } from "@/components/AddressSearchField";
 import { useStoreAuth } from "@/components/StoreAuthContext";
 import { useStoreLocation } from "@/components/LocationContext";
 import { ApiClientError } from "@/lib/api/client";
@@ -24,6 +25,7 @@ const LocationPinMap = dynamic(
 
 export default function LocationPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isAuthenticated, loading: authLoading } = useStoreAuth();
   const { location, setFromBranchPin } = useStoreLocation();
   const [address, setAddress] = useState(location?.address ?? "");
@@ -86,7 +88,10 @@ export default function LocationPage() {
     try {
       await setFromBranchPin(selectedBranch, address.trim(), pin);
       toast.success(`Serving from ${selectedBranch.name}`);
-      router.push("/shop");
+      const from = searchParams.get("from");
+      const next =
+        from && from.startsWith("/") && !from.startsWith("//") ? from : "/shop";
+      router.push(next);
     } catch (err) {
       const message =
         err instanceof ApiClientError || err instanceof Error
@@ -121,14 +126,22 @@ export default function LocationPage() {
           <label className="block">
             <span className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-[var(--forest)]">
               <MapPinned className="h-4 w-4" />
-              Delivery address
+              Search address
             </span>
-            <input
+            <AddressSearchField
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="House / street / landmark"
-              className="h-12 w-full rounded-2xl border border-[var(--forest)]/35 bg-[var(--sand)] px-4 text-sm text-[var(--ink)] outline-none ring-[var(--forest)]/25 focus:ring-2"
+              onChange={setAddress}
+              near={selectedBranch?.gpsCoordinates ?? pin}
+              placeholder="Search street, area, or landmark"
+              onPick={(hit) => {
+                setAddress(hit.label);
+                setPin({ lat: hit.lat, lng: hit.lng });
+                setCoverageError(null);
+              }}
             />
+            <p className="mt-1.5 text-xs text-[var(--muted)]">
+              Pick a result to drop the pin, then drag it if you need to fine-tune.
+            </p>
           </label>
 
           <label className="block">
