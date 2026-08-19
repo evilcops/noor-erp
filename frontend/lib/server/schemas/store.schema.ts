@@ -47,6 +47,19 @@ export const storeLocationSchema = z
     { message: "Provide a branch, address, or GPS coordinates" }
   );
 
+export const storeUpdateOrderAddressSchema = z.object({
+  address: z.string().min(3, "Enter a delivery address"),
+  area: z.string().optional(),
+  lat: z.number().optional(),
+  lng: z.number().optional(),
+  coordinates: z
+    .object({
+      lat: z.number(),
+      lng: z.number(),
+    })
+    .optional(),
+});
+
 export const storeCheckoutSchema = z.object({
   items: z
     .array(

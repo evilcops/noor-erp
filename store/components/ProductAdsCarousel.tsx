@@ -62,7 +62,7 @@ export function ProductAdsCarousel({
           className="animate-fade-in relative grid min-h-[210px] grid-cols-[1.15fr_0.85fr] sm:min-h-[240px] sm:grid-cols-2"
         >
           {/* ── Left: text ── */}
-          <div className="relative z-10 flex flex-col justify-center gap-2.5 py-6 pl-5 pr-2 sm:gap-3 sm:py-8 sm:pl-8">
+          <div className="relative z-10 flex flex-col justify-center gap-2.5 py-6 pl-5 pr-2 sm:gap-3 sm:py-8 sm:pl-16">
             <span className="w-fit rounded-full bg-white/80 px-3 py-1 text-[10px] font-extrabold uppercase tracking-widest text-[var(--forest)] shadow-sm sm:text-[11px]">
               {promo}
             </span>
@@ -111,14 +111,14 @@ export function ProductAdsCarousel({
           </Link>
         </div>
 
-        {/* ── Arrows (desktop) ── */}
+        {/* ── Arrows (desktop) — on the banner edges, clear of copy ── */}
         {ads.length > 1 && (
           <>
             <button
               type="button"
               aria-label="Previous"
               onClick={() => go(safe - 1)}
-              className="absolute left-3 top-1/2 z-20 hidden h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/85 text-[var(--ink)] shadow-md backdrop-blur transition hover:bg-white sm:grid"
+              className="absolute left-3 top-1/2 z-20 hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-white text-[var(--ink)] shadow-md ring-1 ring-black/5 transition hover:bg-[var(--cream)] sm:flex"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
@@ -126,7 +126,7 @@ export function ProductAdsCarousel({
               type="button"
               aria-label="Next"
               onClick={() => go(safe + 1)}
-              className="absolute right-3 top-1/2 z-20 hidden h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/85 text-[var(--ink)] shadow-md backdrop-blur transition hover:bg-white sm:grid"
+              className="absolute right-3 top-1/2 z-20 hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-white text-[var(--ink)] shadow-md ring-1 ring-black/5 transition hover:bg-[var(--cream)] sm:flex"
             >
               <ChevronRight className="h-4 w-4" />
             </button>

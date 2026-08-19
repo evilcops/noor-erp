@@ -713,5 +713,79 @@ export async function trackStoreOrder(req: Request, res: Response) {
             : null,
       travelTimeMinutes: delivery.travelTimeMinutes ?? null,
     },
+    canChangeAddress: !["delivered", "cancelled", "refused", "failed"].includes(delivery.status),
+  });
+}
+
+const TERMINAL_DELIVERY_STATUSES = new Set(["delivered", "cancelled", "refused", "failed"]);
+
+export async function updateStoreOrderAddress(req: Request, res: Response) {
+  const user = assertCustomer(req);
+  const customer = await Customer.findOne({ userId: user._id, deletedAt: null });
+  if (!customer) throw new AppError("NOT_FOUND", "Customer profile not found", 404);
+
+  const sale = await Sale.findOne({
+    _id: req.params.id,
+    customerId: customer._id,
+    $or: [{ source: "store" }, { notes: /Online store order/i }],
+  });
+  if (!sale) throw new AppError("NOT_FOUND", "Order not found", 404);
+
+  const delivery = await Delivery.findOne({ saleId: sale._id, deletedAt: null });
+  if (!delivery) throw new AppError("NOT_FOUND", "Delivery not found for this order", 404);
+
+  if (TERMINAL_DELIVERY_STATUSES.has(delivery.status)) {
+    throw new AppError("BAD_REQUEST", "This delivery can no longer be redirected", 400);
+  }
+
+  const address = String(req.body.address ?? "").trim();
+  if (!address) throw new AppError("BAD_REQUEST", "Enter a delivery address", 400);
+  const area = req.body.area ? String(req.body.area).trim() : delivery.area;
+
+  let coordinates =
+    req.body.coordinates?.lat != null && req.body.coordinates?.lng != null
+      ? { lat: Number(req.body.coordinates.lat), lng: Number(req.body.coordinates.lng) }
+      : req.body.lat != null && req.body.lng != null
+        ? { lat: Number(req.body.lat), lng: Number(req.body.lng) }
+        : undefined;
+
+  if (!coordinates) {
+    coordinates = (await geocodeAddress(address)) ?? undefined;
+  }
+  if (!coordinates && delivery.coordinates?.lat != null && delivery.coordinates?.lng != null) {
+    coordinates = { lat: delivery.coordinates.lat, lng: delivery.coordinates.lng };
+  }
+
+  if (coordinates?.lat != null && coordinates?.lng != null) {
+    const coverage = await resolveNearestStoreBranch(
+      String(sale.companyId),
+      coordinates,
+      String(sale.branchId)
+    );
+    if (!coverage.inService) {
+      throw new AppError("OUT_OF_SERVICE", "We don't deliver to that updated location", 400);
+    }
+    delivery.coordinates = coordinates;
+    if (coverage.clusterId) {
+      delivery.clusterId = new mongoose.Types.ObjectId(coverage.clusterId);
+    }
+    customer.coordinates = coordinates;
+  }
+
+  delivery.deliveryAddress = address;
+  if (area) delivery.area = area;
+  delivery.updatedBy = user._id;
+  await delivery.save();
+
+  customer.address = address;
+  if (area) customer.area = area;
+  customer.updatedBy = user._id;
+  await customer.save();
+
+  return sendSuccess(res, {
+    deliveryAddress: delivery.deliveryAddress,
+    area: delivery.area,
+    coordinates: delivery.coordinates,
+    status: delivery.status,
   });
 }

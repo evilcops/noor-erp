@@ -1,11 +1,13 @@
 "use client";
 
-import { use } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { ArrowLeft, Bike, Clock3, MapPin, Radio } from "lucide-react";
 import { storeApi } from "@/lib/api/store";
+import { ApiClientError } from "@/lib/api/client";
 import { formatPrice } from "@/lib/utils";
 
 const RiderTrackMap = dynamic(
@@ -14,6 +16,16 @@ const RiderTrackMap = dynamic(
     ssr: false,
     loading: () => (
       <div className="h-[280px] animate-pulse rounded-2xl bg-black/[0.04]" />
+    ),
+  }
+);
+
+const LocationPinMap = dynamic(
+  () => import("@/components/LocationPinMap").then((m) => m.LocationPinMap),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[220px] animate-pulse rounded-2xl bg-black/[0.04]" />
     ),
   }
 );
@@ -29,12 +41,34 @@ export default function TrackOrderPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [address, setAddress] = useState("");
+  const [area, setArea] = useState("");
+  const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["store-track", id],
     queryFn: () => storeApi.trackOrder(id),
-    refetchInterval: 10_000,
+    refetchInterval: editing ? false : 10_000,
   });
+
+  useEffect(() => {
+    if (!data || editing) return;
+    setAddress(data.delivery.deliveryAddress || "");
+    setArea(data.delivery.area || "");
+    setPin(
+      data.delivery.coordinates?.lat != null && data.delivery.coordinates?.lng != null
+        ? { lat: data.delivery.coordinates.lat, lng: data.delivery.coordinates.lng }
+        : null
+    );
+  }, [data, editing]);
+
+  const branch = useMemo(() => {
+    const raw = data?.order.branch;
+    return raw && typeof raw === "object" ? raw : null;
+  }, [data]);
 
   if (isLoading) {
     return <div className="mx-auto h-80 max-w-2xl animate-pulse rounded-[2rem] bg-white" />;
@@ -53,13 +87,38 @@ export default function TrackOrderPage({
     );
   }
 
-  const { order, delivery, rider, eta } = data;
+  const { order, delivery, rider, eta, canChangeAddress } = data;
   const mapsUrl =
     rider?.location?.lat != null && rider?.location?.lng != null
       ? `https://www.google.com/maps?q=${rider.location.lat},${rider.location.lng}`
       : delivery.coordinates?.lat != null && delivery.coordinates?.lng != null
         ? `https://www.google.com/maps?q=${delivery.coordinates.lat},${delivery.coordinates.lng}`
         : null;
+
+  async function onSaveAddress(e: React.FormEvent) {
+    e.preventDefault();
+    if (!address.trim()) {
+      toast.error("Enter a delivery address");
+      return;
+    }
+    setBusy(true);
+    try {
+      await storeApi.updateOrderAddress(id, {
+        address: address.trim(),
+        area: area.trim() || undefined,
+        lat: pin?.lat,
+        lng: pin?.lng,
+        coordinates: pin ?? undefined,
+      });
+      toast.success("Delivery address updated");
+      setEditing(false);
+      await queryClient.invalidateQueries({ queryKey: ["store-track", id] });
+    } catch (err) {
+      toast.error(err instanceof ApiClientError ? err.message : "Could not update address");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 animate-float-in">
@@ -69,7 +128,7 @@ export default function TrackOrderPage({
       </Link>
 
       <section className="overflow-hidden rounded-[2rem] bg-[var(--forest)] p-6 text-white shadow-[0_24px_60px_-30px_rgba(var(--brand-shadow),0.75)]">
-        <p className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--lime)]">Live tracking</p>
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/80">Live tracking</p>
         <h1 className="mt-1 font-[family-name:var(--font-display)] text-3xl font-semibold">
           {order.saleNumber}
         </h1>
@@ -111,27 +170,82 @@ export default function TrackOrderPage({
       </section>
 
       <section className="rounded-[1.75rem] border border-black/5 bg-white p-5">
-        <h2 className="font-semibold">Delivery details</h2>
-        <div className="mt-3 space-y-2 text-sm text-[var(--muted)]">
-          <p className="flex items-start gap-2">
-            <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-[var(--forest)]" />
-            <span>{delivery.deliveryAddress || delivery.area || "Delivery address on file"}</span>
-          </p>
-          <p>
-            Window:{" "}
-            {delivery.promisedWindowStart && delivery.promisedWindowEnd
-              ? `${new Date(delivery.promisedWindowStart).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })} – ${new Date(delivery.promisedWindowEnd).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}`
-              : "—"}
-          </p>
-          <p>Warehouse: {statusLabel(delivery.warehouseStatus)}</p>
-          <p>Total: {formatPrice(order.totalAmount)}</p>
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="font-semibold">Delivery details</h2>
+          {canChangeAddress ? (
+            <button
+              type="button"
+              onClick={() => setEditing((v) => !v)}
+              className="text-sm font-bold text-[var(--forest)]"
+            >
+              {editing ? "Cancel" : "Change address"}
+            </button>
+          ) : null}
         </div>
+
+        {!editing ? (
+          <div className="mt-3 space-y-2 text-sm text-[var(--muted)]">
+            <p className="flex items-start gap-2">
+              <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-[var(--forest)]" />
+              <span>{delivery.deliveryAddress || delivery.area || "Delivery address on file"}</span>
+            </p>
+            <p>
+              Window:{" "}
+              {delivery.promisedWindowStart && delivery.promisedWindowEnd
+                ? `${new Date(delivery.promisedWindowStart).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })} – ${new Date(delivery.promisedWindowEnd).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}`
+                : "—"}
+            </p>
+            <p>Warehouse: {statusLabel(delivery.warehouseStatus)}</p>
+            <p>Total: {formatPrice(order.totalAmount)}</p>
+          </div>
+        ) : (
+          <form onSubmit={onSaveAddress} className="mt-4 space-y-3">
+            <p className="text-sm text-[var(--muted)]">
+              Update where this order should be dropped off. The new pin must stay in the same branch coverage.
+            </p>
+            <label className="block text-sm font-semibold">
+              Address
+              <textarea
+                required
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                rows={3}
+                className="mt-1.5 w-full resize-none rounded-2xl border border-black/10 bg-[var(--cream)] px-4 py-3 text-sm outline-none ring-[var(--forest)]/30 focus:ring-2"
+              />
+            </label>
+            <label className="block text-sm font-semibold">
+              Area
+              <input
+                value={area}
+                onChange={(e) => setArea(e.target.value)}
+                className="mt-1.5 h-12 w-full rounded-2xl border border-black/10 bg-[var(--cream)] px-4 text-sm outline-none ring-[var(--forest)]/30 focus:ring-2"
+              />
+            </label>
+            <div>
+              <p className="mb-2 text-sm font-semibold">Move the pin</p>
+              <LocationPinMap
+                lat={pin?.lat}
+                lng={pin?.lng}
+                branchCenter={branch?.gpsCoordinates ?? null}
+                onChange={(lat, lng) => setPin({ lat, lng })}
+                height="220px"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={busy}
+              className="h-12 w-full rounded-full bg-[var(--forest)] text-sm font-extrabold text-white disabled:opacity-60"
+            >
+              {busy ? "Saving…" : "Save delivery address"}
+            </button>
+          </form>
+        )}
       </section>
 
       <section className="rounded-[1.75rem] border border-black/5 bg-white p-5">
