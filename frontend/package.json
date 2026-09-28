@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "seed": "tsx --env-file=.env lib/server/scripts/seed.ts",
+    "import-dar-noon": "tsx --env-file=.env lib/server/scripts/import-dar-noon.ts",
     "reset-admin": "tsx --env-file=.env lib/server/scripts/reset-admin.ts",
     "fleet-scenario": "tsx --env-file=.env lib/server/scripts/fleet-scenario.ts",
     "seed-raya": "echo Use POST /api/dev/seed-raya-products while npm run dev is up"
